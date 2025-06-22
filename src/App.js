@@ -1358,4 +1358,3 @@ function FilmHistory({ db, userId, jobs }) {
 }
 
 export default App;
-
