@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -14,6 +13,10 @@ const firebaseConfig = {
   appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
 const appId = process.env.REACT_APP_FIREBASE_APP_ID; 
+
+// --- Shared Account Credentials ---
+const SHARED_EMAIL = "shared.user@sgi.com";
+const SHARED_PASSWORD = "Gurubaba786@";
 
 // --- Icon Components ---
 const PlusIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>);
@@ -101,17 +104,17 @@ function App() {
         const authInstance = getAuth(app);
         setDb(firestore);
 
-        const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+        const unsubscribe = onAuthStateChanged(authInstance, (user) => {
             if (user) {
                 setUserId(user.uid);
+                setIsAuthReady(true);
             } else {
-                try {
-                   await signInAnonymously(authInstance);
-                } catch (error) {
-                    console.error("Anonymous sign-in failed:", error);
-                }
+                signInWithEmailAndPassword(authInstance, SHARED_EMAIL, SHARED_PASSWORD)
+                    .catch((error) => {
+                        console.error("Error signing into shared Firebase account:", error);
+                        alert("Could not sign in to the shared database. Please ensure the user shared.user@sgi.com exists and Email/Password sign-in is enabled in Firebase.");
+                    });
             }
-             setIsAuthReady(true);
         });
         return () => unsubscribe();
     }, [isAuthenticated]);
@@ -748,7 +751,6 @@ function RollDetailModal({ roll, onClose }) {
     )
 }
 
-// --- Order Management Components ---
 function OrderManagement({ films, jobs, orders, db, userId }) {
     const [showForm, setShowForm] = useState(false);
     const [viewType, setViewType] = useState('active');
@@ -1254,7 +1256,6 @@ function UseStock({ films, jobs, db, userId, setView }) {
     );
 }
 
-// --- Film History Component ---
 function FilmHistory({ db, userId, jobs }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -1341,3 +1342,4 @@ function FilmHistory({ db, userId, jobs }) {
 }
 
 export default App;
+
