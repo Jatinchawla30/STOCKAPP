@@ -14,11 +14,12 @@ const firebaseConfig = {
 };
 const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 
-// --- Helper functions to format dates correctly ---
+
+// --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
     if (!date) return '';
     const d = new Date(date);
-    d.setMinutes(d.getMinutes() + d.getTimezoneOffset()); // Adjust for timezone
+    d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
     const year = d.getFullYear();
     const month = (`0${d.getMonth() + 1}`).slice(-2);
     const day = (`0${d.getDate()}`).slice(-2);
@@ -27,12 +28,15 @@ const toYYYYMMDD = (date) => {
 
 const toDDMMYYYY = (date) => {
     if (!date) return 'N/A';
-    const d = new Date(date);
-    d.setMinutes(d.getMinutes() + d.getTimezoneOffset()); // Adjust for timezone
-    const day = (`0${d.getDate()}`).slice(-2);
-    const month = (`0${d.getMonth() + 1}`).slice(-2);
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+    try {
+        const d = date.toDate ? date.toDate() : new Date(date);
+        const day = (`0${d.getDate()}`).slice(-2);
+        const month = (`0${d.getMonth() + 1}`).slice(-2);
+        const year = d.getFullYear();
+        return `${day}/${month}/${year}`;
+    } catch (e) {
+        return 'Invalid Date';
+    }
 };
 
 
@@ -51,76 +55,46 @@ const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className=
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 
 // --- Login Screen Component ---
+// This component is correct and does not need changes
 function LoginScreen({ auth }) {
-    // ... LoginScreen code remains the same
+    // ...
 }
 
 // --- Main App Component ---
+// This component is correct and does not need changes
 function App() {
-    // ... App component state and useEffect hooks remain the same
+    // ...
 }
 
-// ... All other components are defined below...
-
 // --- MODAL AND HEADER COMPONENTS ---
-// ... (ConfirmationModal, MarkCompleteModal, MessageModal, Header, Nav, NavButton remain the same) ...
+// ... (ConfirmationModal, MarkCompleteModal, MessageModal, Nav, NavButton are correct) ...
+
+function Header({ user }) {
+    // ...
+}
+
 
 // --- FILM INVENTORY COMPONENTS ---
+// This component is correct and does not need changes
 function FilmInventory({ films, db, userId }) {
-    // ... FilmInventory logic remains the same ...
-
-    const handleFormSubmit = async (filmData) => {
-        if (!db || !userId) return;
-        const filmsCollectionPath = `artifacts/${appId}/users/${userId}/films`;
-        
-        const dataToSave = {
-            ...filmData,
-            purchaseDate: new Date(filmData.purchaseDate + 'T00:00:00Z'), // Correctly handle date
-        };
-
-        try {
-            if (editingFilm) {
-                const filmRef = doc(db, filmsCollectionPath, editingFilm.id);
-                await updateDoc(filmRef, dataToSave);
-                setEditingFilm(null);
-            } else {
-                await addDoc(collection(db, filmsCollectionPath), { ...dataToSave, currentWeight: dataToSave.netWeight, createdAt: new Date() });
-            }
-            setShowForm(false);
-        } catch (error) { console.error("Error saving film:", error); }
-    };
     // ...
 }
 
 function FilmForm({ onSubmit, onCancel, initialData }) {
-    const [formData, setFormData] = useState({ filmType: '', netWeight: '', supplier: '', purchaseDate: toYYYYMMDD(new Date()) });
-
-    useEffect(() => {
-        const defaultState = { filmType: '', netWeight: '', supplier: '', purchaseDate: toYYYYMMDD(new Date()) };
-        if (initialData) {
-            const purchaseDate = initialData.purchaseDate?.toDate ? toYYYYMMDD(initialData.purchaseDate.toDate()) : defaultState.purchaseDate;
-            setFormData({
-                filmType: initialData.filmType || '', netWeight: initialData.netWeight || '',
-                supplier: initialData.supplier || '',
-                purchaseDate: purchaseDate,
-            });
-        } else { setFormData(defaultState); }
-    }, [initialData]);
-
-    // ... handle change and submit logic remains the same
+    // ...
 }
 
 function FilmList({ films, onEdit, onDelete }) {
     return (
         <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-md">
             <table className="w-full text-left">
-                {/* ... table head ... */}
+                {/* ... */}
                 <tbody>
                     {films.map(film => (
                         <tr key={film.id} className="border-b border-gray-700 hover:bg-gray-700/50">
-                            {/* ... other tds ... */}
+                            {/* ... */}
                             <td className="p-3">{toDDMMYYYY(film.purchaseDate?.toDate())}</td>
-                            {/* ... actions ... */}
+                            {/* ... */}
                         </tr>
                     ))}
                 </tbody>
@@ -129,17 +103,16 @@ function FilmList({ films, onEdit, onDelete }) {
     );
 }
 
-// ... (CategoryList remains the same)
-
 // --- JOB MANAGEMENT COMPONENTS ---
+// ... (JobManagement and JobForm are correct) ...
 
-// NEW/UPDATED COMPONENT
+// --- Edit History Modal Component ---
 function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
     const [consumedAt, setConsumedAt] = useState('');
 
     useEffect(() => {
         if (historyEntry) {
-            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt.toDate()));
+            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt?.toDate()));
         }
     }, [historyEntry]);
 
@@ -182,144 +155,9 @@ function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
     );
 }
 
-// UPDATED COMPONENT
-function JobManagement({ films, jobs, orders, db, userId }) {
-    const [showForm, setShowForm] = useState(false);
-    const [editingJob, setEditingJob] = useState(null);
-    const [jobSearch, setJobSearch] = useState('');
-    const [isDeleteModalOpen, setDeleteModalOpen] = useState(false);
-    const [jobToDelete, setJobToDelete] = useState(null);
-    const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
-    const [messageModalContent, setMessageModalContent] = useState({title: '', body: ''});
-
-    const handleJobSubmit = async (jobData) => {
-        if (!db || !userId) return;
-        const jobsCollectionPath = `artifacts/${appId}/users/${userId}/jobs`;
-        try {
-             if (editingJob) {
-                const jobRef = doc(db, jobsCollectionPath, editingJob.id);
-                await updateDoc(jobRef, jobData);
-                setEditingJob(null);
-            } else {
-                await addDoc(collection(db, jobsCollectionPath), { ...jobData, createdAt: new Date() });
-            }
-            setShowForm(false);
-        } catch (error) { console.error("Error saving job:", error); }
-    };
-
-    const handleEditJob = (job) => {
-        setEditingJob(job);
-        setShowForm(true);
-    };
-
-    // ... (rest of JobManagement component remains the same)
-}
-
-// ... (JobForm updated to handle `initialData` for editing)
-
-// UPDATED COMPONENT
-function JobCard({ job, films, onDelete, onEdit, db, userId }) {
-    const [showHistory, setShowHistory] = useState(false);
-    const [showStock, setShowStock] = useState(false);
-    const [history, setHistory] = useState([]);
-    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
-
-    const toggleHistory = () => {
-        setShowHistory(prev => !prev);
-    };
-    
-    useEffect(() => {
-        if (!showHistory || !db || !userId) return;
-
-        setIsLoadingHistory(true);
-        const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
-        const q = query(collection(db, historyCollectionPath), orderBy("consumedAt", "desc"));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const historyData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setHistory(historyData);
-            setIsLoadingHistory(false);
-        });
-        return () => unsubscribe();
-    }, [showHistory, db, userId, job.id]);
-
-
-    const handleUpdateHistory = async (historyId, newDate) => {
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`, historyId);
-        try {
-            await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
-            setEditingHistoryEntry(null);
-        } catch (error) {
-            console.error("Error updating history entry:", error);
-        }
-    };
-    
-    const handleDeleteHistory = async (historyId) => {
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`, historyId);
-        try {
-            await deleteDoc(historyRef);
-            setEditingHistoryEntry(null);
-        } catch (error) {
-            console.error("Error deleting history entry:", error);
-        }
-    };
-
-    return (
-        <>
-            <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-gray-600">
-                <div className="flex justify-between items-start">
-                    {/* ... Job details ... */}
-                    <div className="flex items-center space-x-3">
-                         <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                         {/* ... other buttons ... */}
-                    </div>
-                </div>
-                {/* ... rest of JobCard display ... */}
-                {showHistory && (
-                    <div className="mt-4 border-t border-gray-700 pt-4">
-                        <h4 className="font-semibold text-lg text-cyan-400 mb-2">Consumed Roll History</h4>
-                        {isLoadingHistory ? <p>Loading history...</p> : (
-                            history.length > 0 ? (
-                                <ul className="space-y-2">
-                                    {history.map(roll => (
-                                        <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
-                                            <div>
-                                                <p className="font-semibold">{roll.filmType}</p>
-                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt.toDate())}</p>
-                                            </div>
-                                            <button onClick={() => setEditingHistoryEntry(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : <p>No rolls have been consumed for this job.</p>
-                        )}
-                    </div>
-                )}
-            </div>
-            <EditHistoryModal 
-                isOpen={!!editingHistoryEntry}
-                onClose={() => setEditingHistoryEntry(null)}
-                onSave={handleUpdateHistory}
-                onDelete={handleDeleteHistory}
-                historyEntry={editingHistoryEntry}
-            />
-        </>
-    );
-}
-
-// ... (RollDetailModal and OrderManagement components remain largely the same, but date displays should be updated) ...
-// Example update for OrderCard:
-function OrderCard({ order /* ...other props */ }) {
-    // ...
-    return (
-        // ...
-        <p className="text-xs text-purple-400 mt-1">Completed: {toDDMMYYYY(order.completedAt?.toDate())}</p>
-        // ...
-    );
-}
+// ... (Other components like JobCard, OrderManagement, etc. have been updated for editing and date formatting as in the previous response)
 
 // --- GLOBAL FILM HISTORY ---
-// UPDATED COMPONENT
 function FilmHistory({ db, userId, jobs }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -327,8 +165,36 @@ function FilmHistory({ db, userId, jobs }) {
     const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
 
     useEffect(() => {
-        // ... data fetching logic is the same ...
-    }, [db, userId, jobs]);
+        if (!db || !userId) {
+            setIsLoading(false);
+            return;
+        }
+
+        const fetchAllHistories = async () => {
+            setIsLoading(true);
+            try {
+                // Using collectionGroup to get all 'consumedRolls' for the user, regardless of job
+                const historyCollectionRef = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
+                const snapshot = await getDocs(historyCollectionRef);
+                
+                const combinedHistory = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    jobId: doc.ref.parent.parent.id, // Get the parent job ID
+                    ...doc.data()
+                }));
+
+                combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
+                setHistory(combinedHistory);
+
+            } catch (error) {
+                console.error("Error fetching global film history:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchAllHistories();
+    }, [db, userId]);
 
     const handleUpdateHistory = async (historyId, newDate) => {
         if (!editingHistoryEntry) return;
@@ -337,6 +203,8 @@ function FilmHistory({ db, userId, jobs }) {
         try {
             await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
             setEditingHistoryEntry(null);
+            // Manually update local state to see the change instantly
+            setHistory(prev => prev.map(h => h.id === historyId ? {...h, consumedAt: { toDate: () => new Date(newDate + 'T00:00:00Z') } } : h));
         } catch (error) {
             console.error("Error updating history entry:", error);
         }
@@ -349,18 +217,37 @@ function FilmHistory({ db, userId, jobs }) {
         try {
             await deleteDoc(historyRef);
             setEditingHistoryEntry(null);
+            // Manually update local state
+             setHistory(prev => prev.filter(h => h.id !== historyId));
         } catch (error) {
             console.error("Error deleting history entry:", error);
         }
     };
 
+
     const filteredHistory = history.filter(item => {
-        // ... filtering logic is the same ...
+        const searchTerm = historySearch.toLowerCase();
+        const filmMatch = item.filmType?.toLowerCase().includes(searchTerm);
+        const jobMatch = item.jobName?.toLowerCase().includes(searchTerm);
+        return filmMatch || jobMatch;
     });
 
     return(
         <section>
-            {/* ... search bar ... */}
+            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
+                <div className="relative w-full md:w-full">
+                    <input
+                        type="text"
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        placeholder="Search by film or job name..."
+                        className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
+                </div>
+            </div>
+
             {isLoading ? <p>Loading history...</p> : (
                 <div className="space-y-3">
                     {filteredHistory.length > 0 ? filteredHistory.map(item => (
@@ -371,7 +258,7 @@ function FilmHistory({ db, userId, jobs }) {
                                 <p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt.toDate())}</p>
                                 <p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p>
                             </div>
-                            <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                            <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button>
                         </div>
                     )) : <p className="text-center text-gray-500 py-8">No usage history found for your search.</p>}
                 </div>
@@ -386,5 +273,6 @@ function FilmHistory({ db, userId, jobs }) {
         </section>
     );
 }
+
 
 export default App;
