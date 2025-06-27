@@ -1153,7 +1153,7 @@ function FilmHistory({ db, userId, jobs }) {
             }));
             const enrichedHistory = historyData.map(item => ({
                 ...item,
-                jobName: jobs.find(job => job.id === item.jobId)?.jobName
+                jobName: jobs.find(job => job.id === item.jobId)?.jobName || 'N/A'
             }));
             setHistory(enrichedHistory);
             setIsLoading(false);
@@ -1187,7 +1187,7 @@ function FilmHistory({ db, userId, jobs }) {
 
     const filteredHistory = history.filter(item =>
         item.filmType.toLowerCase().includes(historySearch.toLowerCase()) ||
-        item.jobName?.toLowerCase().includes(historySearch.toLowerCase()) ||
+        item.jobName.toLowerCase().includes(historySearch.toLowerCase()) ||
         item.supplier.toLowerCase().includes(historySearch.toLowerCase())
     );
 
@@ -1198,7 +1198,7 @@ function FilmHistory({ db, userId, jobs }) {
                 <div className="relative">
                     <input
                         type="text"
-                        placeholder="Search history..."
+                        placeholder="Search by film or job name..."
                         value={historySearch}
                         onChange={(e) => setHistorySearch(e.target.value)}
                         className="pl-10 pr-4 py-2 bg-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
@@ -1212,13 +1212,13 @@ function FilmHistory({ db, userId, jobs }) {
                         <div key={item.id} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center">
                             <div>
                                 <p className="font-bold text-lg text-cyan-400">{item.filmType}</p>
-                                <p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p>
+                                <p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName}</span></p>
                                 <p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt.toDate())}</p>
                                 <p className="text-gray-400 text-sm">Supplier: {item.supplier} | Consumed Weight: {item.netWeight.toFixed(2)}kg</p>
                             </div>
                             <div className="flex space-x-3">
                                 <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                                <button onClick={() => setEditingHistoryEntry(item)} className="text-red-400 hover:text-red-300"><TrashIcon /></button>
+                                <button onClick={() => setEditingHistoryEntry(item)} className="text-red-400 hover:text-red-300" onClick={() => { if (window.confirm("Are you sure you want to delete this history entry? This cannot be undone.")) handleDeleteHistory(item.id); }}><TrashIcon /></button>
                             </div>
                         </div>
                     )) : <p className="text-center text-gray-500 py-8">No usage history found for your search.</p>}
