@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
-  getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, orderBy
+  getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, getDocs
 } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -63,7 +63,7 @@ function App() {
     return () => unsubscribe();
   }, [db, userId]);
 
-  // Fetch jobs (if needed for history)
+  // Fetch jobs (for history)
   useEffect(() => {
     if (!db || !userId) return;
     const jobsCollection = collection(db, `artifacts/${appId}/users/${userId}/jobs`);
@@ -74,9 +74,9 @@ function App() {
   }, [db, userId]);
 
   return (
-    <div>
-      <h1>Film Inventory App</h1>
-      <button onClick={() => setShowHistory(!showHistory)}>
+    <div style={{ padding: 32 }}>
+      <h1>Rotogravure Stock Manager</h1>
+      <button onClick={() => setShowHistory(!showHistory)} style={{ marginBottom: 16 }}>
         {showHistory ? "Back to Inventory" : "Show Film History"}
       </button>
       {showHistory
@@ -152,7 +152,7 @@ function FilmForm({ onSubmit, onCancel, initialData }) {
     if (initialData) {
       const purchaseDate = initialData.purchaseDate?.toDate
         ? toYYYYMMDD(initialData.purchaseDate.toDate())
-        : toYYYYMMDD(new Date());
+        : toYYYYMMDD(initialData.purchaseDate || new Date());
       setFormData({
         filmType: initialData.filmType || '',
         netWeight: initialData.netWeight || '',
@@ -173,7 +173,7 @@ function FilmForm({ onSubmit, onCancel, initialData }) {
   };
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} style={{ margin: '16px 0' }}>
       <input name="filmType" placeholder="Film Type" value={formData.filmType} onChange={handleChange} required />
       <input name="netWeight" placeholder="Net Weight" value={formData.netWeight} onChange={handleChange} required type="number" />
       <input name="supplier" placeholder="Supplier" value={formData.supplier} onChange={handleChange} required />
@@ -190,7 +190,7 @@ function FilmList({ films, onEdit, onDelete }) {
       <thead>
         <tr>
           <th>Film Type</th>
-          <th>Net Weight</th>
+          <th>Current Wt. (kg)</th>
           <th>Supplier</th>
           <th>Purchase Date</th>
           <th>Actions</th>
@@ -200,9 +200,15 @@ function FilmList({ films, onEdit, onDelete }) {
         {films.map(film => (
           <tr key={film.id}>
             <td>{film.filmType}</td>
-            <td>{film.netWeight}</td>
+            <td>{parseFloat(film.currentWeight || film.netWeight).toFixed(2)}</td>
             <td>{film.supplier}</td>
-            <td>{toDDMMYYYY(film.purchaseDate?.toDate ? film.purchaseDate.toDate() : film.purchaseDate)}</td>
+            <td>
+              {film.purchaseDate
+                ? toDDMMYYYY(film.purchaseDate?.toDate
+                  ? film.purchaseDate.toDate()
+                  : film.purchaseDate)
+                : ''}
+            </td>
             <td>
               <button onClick={() => onEdit(film)}>Edit</button>
               <button onClick={() => onDelete(film.id)}>Delete</button>
@@ -222,9 +228,8 @@ function FilmHistory({ db, userId, jobs }) {
   const [editDate, setEditDate] = useState('');
 
   useEffect(() => {
-    if (!db || !userId) return;
+    if (!db || !userId || jobs.length === 0) return;
     setIsLoading(true);
-    // Fetch all consumedRolls from all jobs
     const fetchHistory = async () => {
       let allHistory = [];
       for (const job of jobs) {
@@ -247,7 +252,7 @@ function FilmHistory({ db, userId, jobs }) {
 
   const startEdit = (entry) => {
     setEditingEntry(entry);
-    setEditDate(toYYYYMMDD(entry.consumedAt.toDate ? entry.consumedAt.toDate() : entry.consumedAt));
+    setEditDate(toYYYYMMDD(entry.consumedAt?.toDate ? entry.consumedAt.toDate() : entry.consumedAt));
   };
 
   const handleEditSave = async () => {
@@ -257,7 +262,6 @@ function FilmHistory({ db, userId, jobs }) {
     setEditingEntry(null);
     setEditDate('');
     // Refresh history
-    // (You could optimize this, but for simplicity we'll reload)
     window.location.reload();
   };
 
@@ -299,11 +303,11 @@ function FilmHistory({ db, userId, jobs }) {
                     onChange={e => setEditDate(e.target.value)}
                   />
                 ) : (
-                  toDDMMYYYY(item.consumedAt.toDate ? item.consumedAt.toDate() : item.consumedAt)
+                  toDDMMYYYY(item.consumedAt?.toDate ? item.consumedAt.toDate() : item.consumedAt)
                 )}
               </td>
               <td>{item.supplier}</td>
-              <td>{item.netWeight ? item.netWeight.toFixed(2) : ''}kg</td>
+              <td>{item.netWeight ? parseFloat(item.netWeight).toFixed(2) : ''}kg</td>
               <td>
                 {editingEntry && editingEntry.id === item.id ? (
                   <>
