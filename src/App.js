@@ -16,9 +16,12 @@ const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 
 // --- Helper functions to format dates correctly ---
 const toYYYYMMDD = (date) => {
-    if (!date || isNaN(new Date(date).getTime())) return '';
+    if (!date || isNaN(new Date(date).getTime())) {
+        console.log("Invalid date in toYYYYMMDD:", date);
+        return '';
+    }
     const d = new Date(date);
-    d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
+    d.setMinutes(d.getMinutes() + d.getTimezoneOffset()); // Adjust for IST (UTC+5:30)
     const year = d.getFullYear();
     const month = (`0${d.getMonth() + 1}`).slice(-2);
     const day = (`0${d.getDate()}`).slice(-2);
@@ -26,9 +29,12 @@ const toYYYYMMDD = (date) => {
 };
 
 const toDDMMYYYY = (date) => {
-    if (!date || isNaN(new Date(date).getTime())) return 'N/A';
+    if (!date || isNaN(new Date(date).getTime())) {
+        console.log("Invalid date in toDDMMYYYY:", date);
+        return 'N/A';
+    }
     const d = new Date(date);
-    d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
+    d.setMinutes(d.getMinutes() + d.getTimezoneOffset()); // Adjust for IST
     const day = (`0${d.getDate()}`).slice(-2);
     const month = (`0${d.getMonth() + 1}`).slice(-2);
     const year = d.getFullYear();
@@ -59,9 +65,11 @@ function LoginScreen({ auth }) {
         e.preventDefault();
         try {
             await setPersistence(auth, browserSessionPersistence);
-            await signInWithEmailAndPassword(auth, email, password);
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            console.log("Logged in user:", userCredential.user.uid);
             setError('');
         } catch (err) {
+            console.error("Login error:", err);
             setError('Failed to log in. Please check your credentials.');
         }
     };
@@ -109,7 +117,7 @@ function LoginScreen({ auth }) {
 
 // --- Main App Component ---
 function App() {
-    const [userId, setUserId] = useState(null);
+    const [userId, setUserId] = useState(localStorage.getItem('userId') || null);
     const [films, setFilms] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [orders, setOrders] = useState([]);
@@ -121,9 +129,14 @@ function App() {
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             if (user) {
-                setUserId(user.uid);
+                const uid = user.uid;
+                setUserId(uid);
+                localStorage.setItem('userId', uid);
+                console.log("Auth state changed, userId:", uid);
             } else {
                 setUserId(null);
+                localStorage.removeItem('userId');
+                console.log("No user logged in");
             }
         });
         return () => unsubscribe();
@@ -158,6 +171,8 @@ function App() {
     const handleSignOut = async () => {
         try {
             await signOut(auth);
+            localStorage.removeItem('userId');
+            console.log("Signed out");
         } catch (error) {
             console.error("Error signing out:", error);
         }
@@ -235,7 +250,7 @@ function Header({ onSignOut }) {
         <header className="bg-gray-800 p-4 shadow-md">
             <div className="container mx-auto flex justify-between items-center">
                 <h1 className="text-2xl font-bold text-cyan-400">Film Inventory Management</h1>
-                <button onClick={handleSignOut} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Sign Out</button>
+                <button onClick={onSignOut} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Sign Out</button>
             </div>
         </header>
     );
@@ -490,7 +505,9 @@ function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
 
     useEffect(() => {
         if (historyEntry) {
-            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt.toDate()));
+            const dateStr = toYYYYMMDD(historyEntry.consumedAt.toDate());
+            setConsumedAt(dateStr);
+            console.log("Setting consumedAt:", dateStr);
         }
     }, [historyEntry]);
 
@@ -518,148 +535,3 @@ function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
                             value={consumedAt}
                             onChange={(e) => setConsumedAt(e.target.value)}
                             className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-                        />
-                    </div>
-                </div>
-                <div className="flex justify-between mt-6 gap-4">
-                    <button onClick={handleDelete} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete Entry</button>
-                    <div>
-                        <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg mr-2">Cancel</button>
-                        <button onClick={() => onSave(historyEntry.id, consumedAt)} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function JobManagement({ films, jobs, orders, db, userId }) {
-    const [showForm, setShowForm] = useState(false);
-    const [editingJob, setEditingJob] = useState(null);
-    const [jobSearch, setJobSearch] = useState('');
-    const [isDeleteModalOpen, setDeleteModalOpen] = useState(false);
-    const [jobToDelete, setJobToDelete] = useState(null);
-    const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
-    const [messageModalContent, setMessageModalContent] = useState({ title: '', body: '' });
-
-    const handleJobSubmit = async (jobData) => {
-        if (!db || !userId) return;
-        const jobsCollectionPath = `artifacts/${appId}/users/${userId}/jobs`;
-        try {
-            if (editingJob) {
-                const jobRef = doc(db, jobsCollectionPath, editingJob.id);
-                await updateDoc(jobRef, jobData);
-                setEditingJob(null);
-            } else {
-                await addDoc(collection(db, jobsCollectionPath), { ...jobData, createdAt: new Date() });
-            }
-            setShowForm(false);
-        } catch (error) { console.error("Error saving job:", error); }
-    };
-
-    const handleEditJob = (job) => {
-        setEditingJob(job);
-        setShowForm(true);
-    };
-
-    const handleDeleteJob = async () => {
-        if (!jobToDelete || !db) return;
-        try {
-            const jobRef = doc(db, `artifacts/${appId}/users/${userId}/jobs`, jobToDelete.id);
-            const consumedRollsRef = collection(db, `artifacts/${appId}/users/${userId}/jobs/${jobToDelete.id}/consumedRolls`);
-            const batch = writeBatch(db);
-            const consumedRolls = await getDocs(consumedRollsRef);
-            consumedRolls.forEach(doc => batch.delete(doc.ref));
-            batch.delete(jobRef);
-            await batch.commit();
-            setDeleteModalOpen(false);
-            setJobToDelete(null);
-        } catch (error) { console.error("Error deleting job:", error); }
-    };
-
-    const filteredJobs = jobs.filter(job =>
-        job.jobName.toLowerCase().includes(jobSearch.toLowerCase()) ||
-        job.orderId?.toLowerCase().includes(jobSearch.toLowerCase())
-    );
-
-    return (
-        <section>
-            <div className="flex justify-between items-center mb-4">
-                <h2 className="text-2xl font-bold text-cyan-400">Job Management</h2>
-                <div className="flex items-center space-x-4">
-                    <div className="relative">
-                        <input
-                            type="text"
-                            placeholder="Search jobs..."
-                            value={jobSearch}
-                            onChange={(e) => setJobSearch(e.target.value)}
-                            className="pl-10 pr-4 py-2 bg-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-                        />
-                        <div className="absolute inset-y-0 left-0 flex items-center pl-3"><SearchIcon /></div>
-                    </div>
-                    <button onClick={() => { setEditingJob(null); setShowForm(true); }} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg flex items-center"><PlusIcon /><span className="ml-2">Add Job</span></button>
-                </div>
-            </div>
-            {showForm && (
-                <JobForm
-                    films={films}
-                    orders={orders}
-                    onSubmit={handleJobSubmit}
-                    onCancel={() => setShowForm(false)}
-                    initialData={editingJob}
-                    db={db}
-                    userId={userId}
-                />
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredJobs.map(job => (
-                    <JobCard
-                        key={job.id}
-                        job={job}
-                        films={films}
-                        onEdit={handleEditJob}
-                        onDelete={(job) => { setJobToDelete(job); setDeleteModalOpen(true); }}
-                        db={db}
-                        userId={userId}
-                    />
-                ))}
-            </div>
-            <ConfirmationModal
-                isOpen={isDeleteModalOpen}
-                onClose={() => setDeleteModalOpen(false)}
-                onConfirm={handleDeleteJob}
-                message="Are you sure you want to delete this job and all its consumed rolls? This action cannot be undone."
-            />
-            <MessageModal
-                isOpen={isMessageModalOpen}
-                onClose={() => setIsMessageModalOpen(false)}
-                title={messageModalContent.title}
-                body={messageModalContent.body}
-            />
-        </section>
-    );
-}
-
-function JobForm({ films, orders, onSubmit, onCancel, initialData, db, userId }) {
-    const [formData, setFormData] = useState({
-        jobName: '',
-        orderId: '',
-        filmId: '',
-        filmWeight: '',
-        completed: false,
-        completedAt: ''
-    });
-    const [isCompleteModalOpen, setCompleteModalOpen] = useState(false);
-
-    useEffect(() => {
-        if (initialData) {
-            setFormData({
-                jobName: initialData.jobName || '',
-                orderId: initialData.orderId || '',
-                filmId: initialData.filmId || '',
-                filmWeight: initialData.filmWeight || '',
-                completed: initialData.completed || false,
-                completedAt: initialData.completedAt ? toYYYYMMDD(initialData.completedAt.toDate()) : ''
-            });
-        }
-    },
