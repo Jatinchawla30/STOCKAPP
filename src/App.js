@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, setPersistence, browserSessionPersistence } from 'firebase/auth';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -14,11 +14,14 @@ const firebaseConfig = {
 };
 const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 
-// --- DATE HELPER FUNCTIONS ---
+// --- Helper functions to format dates correctly ---
 const toYYYYMMDD = (date) => {
-    if (!date) return '';
+    if (!date || isNaN(new Date(date).getTime())) {
+        console.log("Invalid date in toYYYYMMDD:", date);
+        return '';
+    }
     const d = new Date(date);
-    d.setMinutes(d.getMinutes() + d.getTimezoneOffset()); // Adjust for timezone to prevent off-by-one day errors
+    d.setMinutes(d.getMinutes() + d.getTimezoneOffset()); // Adjust for IST (UTC+5:30)
     const year = d.getFullYear();
     const month = (`0${d.getMonth() + 1}`).slice(-2);
     const day = (`0${d.getDate()}`).slice(-2);
@@ -26,18 +29,17 @@ const toYYYYMMDD = (date) => {
 };
 
 const toDDMMYYYY = (date) => {
-    if (!date) return 'N/A';
-    try {
-        const d = date.toDate ? date.toDate() : new Date(date);
-        const day = (`0${d.getDate()}`).slice(-2);
-        const month = (`0${d.getMonth() + 1}`).slice(-2);
-        const year = d.getFullYear();
-        return `${day}/${month}/${year}`;
-    } catch (e) {
-        return 'Invalid Date';
+    if (!date || isNaN(new Date(date).getTime())) {
+        console.log("Invalid date in toDDMMYYYY:", date);
+        return 'N/A';
     }
+    const d = new Date(date);
+    d.setMinutes(d.getMinutes() + d.getTimezoneOffset()); // Adjust for IST
+    const day = (`0${d.getDate()}`).slice(-2);
+    const month = (`0${d.getMonth() + 1}`).slice(-2);
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
 };
-
 
 // --- Icon Components ---
 const PlusIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>);
@@ -46,7 +48,7 @@ const TrashIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 
 const PackageIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-14L4 7m0 0v10l8 4m0-14L4 7m16 0L4 7" /></svg>);
 const ChevronLeftIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" /></svg>);
 const SearchIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>);
-const HistoryIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clipRule="evenodd" /></svg>);
+const HistoryIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 const ClipboardListIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>);
 const XIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>);
 const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>);
@@ -61,35 +63,51 @@ function LoginScreen({ auth }) {
 
     const handleLogin = async (e) => {
         e.preventDefault();
-        setError('');
         try {
-            await signInWithEmailAndPassword(auth, email, password);
-        } catch (error) {
-            setError('Failed to log in. Please check your email and password.');
-            console.error("Login Error:", error);
+            await setPersistence(auth, browserSessionPersistence);
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            console.log("Logged in user:", userCredential.user.uid);
+            setError('');
+        } catch (err) {
+            console.error("Login error:", err);
+            setError('Failed to log in. Please check your credentials.');
         }
     };
 
     return (
-        <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
-            <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
-                <div className="flex flex-col items-center">
+        <div className="min-h-screen flex items-center justify-center bg-gray-900">
+            <div className="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-md">
+                <div className="flex justify-center mb-6">
                     <LockClosedIcon />
-                    <h1 className="text-3xl font-bold text-cyan-400 mb-2">Login</h1>
-                    <p className="text-gray-400 mb-6">Please enter your credentials</p>
                 </div>
+                <h2 className="text-2xl font-bold text-center text-cyan-400 mb-6">Login</h2>
+                {error && <p className="text-red-500 text-center mb-4">{error}</p>}
                 <form onSubmit={handleLogin} className="space-y-6">
                     <div>
-                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" autoComplete="email"
-                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                        <label className="block text-sm font-medium text-gray-300">Email</label>
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                            required
+                        />
                     </div>
                     <div>
-                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password"
-                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                        <label className="block text-sm font-medium text-gray-300">Password</label>
+                        <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                            required
+                        />
                     </div>
-                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-                    <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-md transition-transform duration-200 hover:scale-105">
-                        Login
+                    <button
+                        type="submit"
+                        className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg"
+                    >
+                        Log In
                     </button>
                 </form>
             </div>
@@ -99,216 +117,181 @@ function LoginScreen({ auth }) {
 
 // --- Main App Component ---
 function App() {
-    const [user, setUser] = useState(null);
-    const [db, setDb] = useState(null);
-    const [auth, setAuth] = useState(null);
-    const [isAuthReady, setIsAuthReady] = useState(false);
-    const [view, setView] = useState('stock');
+    const [userId, setUserId] = useState(localStorage.getItem('userId') || null);
     const [films, setFilms] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [orders, setOrders] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [activeSection, setActiveSection] = useState('filmInventory');
+    const app = useMemo(() => initializeApp(firebaseConfig), []);
+    const db = useMemo(() => getFirestore(app), [app]);
+    const auth = useMemo(() => getAuth(app), [app]);
 
     useEffect(() => {
-        const app = initializeApp(firebaseConfig);
-        const firestore = getFirestore(app);
-        const authInstance = getAuth(app);
-        setDb(firestore);
-        setAuth(authInstance);
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            if (user) {
+                const uid = user.uid;
+                setUserId(uid);
+                localStorage.setItem('userId', uid);
+                console.log("Auth state changed, userId:", uid);
+            } else {
+                setUserId(null);
+                localStorage.removeItem('userId');
+                console.log("No user logged in");
+            }
+        });
+        return () => unsubscribe();
+    }, [auth]);
 
-        const unsubscribe = onAuthStateChanged(authInstance, (user) => {
-            setUser(user);
-            setIsAuthReady(true);
+    useEffect(() => {
+        if (!userId || !db) return;
+
+        const filmsCollectionPath = `artifacts/${appId}/users/${userId}/films`;
+        const jobsCollectionPath = `artifacts/${appId}/users/${userId}/jobs`;
+        const ordersCollectionPath = `artifacts/${appId}/users/${userId}/orders`;
+
+        const unsubFilms = onSnapshot(collection(db, filmsCollectionPath), (snapshot) => {
+            setFilms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
-        return () => unsubscribe();
-    }, []);
-
-    useEffect(() => {
-        if (!isAuthReady || !db || !user) {
-          if (isAuthReady) { 
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        setIsLoading(true);
-
-        const filmsPath = `artifacts/${appId}/users/${user.uid}/films`;
-        const qFilms = query(collection(db, filmsPath));
-        const unsubscribeFilms = onSnapshot(qFilms, (snapshot) => {
-            setFilms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        }, (error) => console.error("Error fetching films:", error));
-
-        const jobsPath = `artifacts/${appId}/users/${user.uid}/jobs`;
-        const qJobs = query(collection(db, jobsPath));
-        const unsubscribeJobs = onSnapshot(qJobs, (snapshot) => {
+        const unsubJobs = onSnapshot(query(collection(db, jobsCollectionPath), orderBy('createdAt', 'desc')), (snapshot) => {
             setJobs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        }, (error) => console.error("Error fetching jobs:", error));
+        });
 
-        const ordersPath = `artifacts/${appId}/users/${user.uid}/orders`;
-        const qOrders = query(collection(db, ordersPath), orderBy("createdAt", "desc"));
-        const unsubscribeOrders = onSnapshot(qOrders, (snapshot) => {
+        const unsubOrders = onSnapshot(query(collection(db, ordersCollectionPath), orderBy('createdAt', 'desc')), (snapshot) => {
             setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        }, (error) => console.error("Error fetching orders:", error));
-
-        Promise.all([
-            getDocs(qFilms), getDocs(qJobs), getDocs(qOrders)
-        ]).catch(console.error).finally(() => setIsLoading(false));
+        });
 
         return () => {
-             unsubscribeFilms();
-             unsubscribeJobs();
-             unsubscribeOrders();
+            unsubFilms();
+            unsubJobs();
+            unsubOrders();
         };
-    }, [isAuthReady, db, user]);
+    }, [db, userId]);
 
-    const handleLogout = () => {
-        if(auth) {
-            signOut(auth);
+    const handleSignOut = async () => {
+        try {
+            await signOut(auth);
+            localStorage.removeItem('userId');
+            console.log("Signed out");
+        } catch (error) {
+            console.error("Error signing out:", error);
         }
     };
-    
-    if (!isAuthReady) {
-        return (
-            <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-                <div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Initializing...</p></div>
-            </div>
-        );
-    }
 
-    if (!user) {
+    if (!userId) {
         return <LoginScreen auth={auth} />;
     }
-    
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-                <div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Loading Inventory...</p></div>
-            </div>
-        );
-    }
-    
+
     return (
-        <div className="bg-gray-900 min-h-screen font-sans text-white">
-            <div className="container mx-auto p-4 md:p-8">
-                <Header user={user} />
-                <Nav view={view} setView={setView} />
-                 <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-                     Logout
-                 </button>
-                <main className="mt-8">
-                    {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} />}
-                    {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
-                    {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
-                    {view === 'use_stock' && <UseStock films={films} jobs={jobs} db={db} userId={user.uid} setView={setView} />}
-                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs}/>}
-                </main>
-            </div>
+        <div className="min-h-screen bg-gray-900 text-white">
+            <Header onSignOut={handleSignOut} />
+            <Nav activeSection={activeSection} setActiveSection={setActiveSection} />
+            <main className="container mx-auto p-4">
+                {activeSection === 'filmInventory' && <FilmInventory films={films} db={db} userId={userId} />}
+                {activeSection === 'jobManagement' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={userId} />}
+                {activeSection === 'orderManagement' && <OrderManagement orders={orders} jobs={jobs} db={db} userId={userId} />}
+                {activeSection === 'filmHistory' && <FilmHistory db={db} userId={userId} jobs={jobs} />}
+            </main>
         </div>
     );
 }
 
 // --- MODAL AND HEADER COMPONENTS ---
-const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children }) => {
+function ConfirmationModal({ isOpen, onClose, onConfirm, message }) {
     if (!isOpen) return null;
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
-            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 text-center">
-                <div className="flex justify-center mb-4">
-                    <ExclamationIcon />
-                </div>
-                <h3 className="text-2xl font-bold text-white mb-2">{title}</h3>
-                <div className="text-gray-300 mb-6">{children}</div>
-                <div className="flex justify-center gap-4">
-                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">Cancel</button>
-                    <button onClick={onConfirm} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">Confirm Delete</button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const MarkCompleteModal = ({ isOpen, onClose, onConfirm, order }) => {
-    const [completionDate, setCompletionDate] = useState(toYYYYMMDD(new Date()));
-    if (!isOpen) return null;
-
-    const handleConfirm = () => {
-        onConfirm(order.id, new Date(completionDate + 'T00:00:00Z'));
-    };
-
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
-                <h3 className="text-xl font-bold text-cyan-400 mb-4">Complete Order</h3>
-                <p className="text-gray-300 mb-4">Select a completion date for order <strong className="text-white">{order?.orderName}</strong>.</p>
-                <input 
-                    type="date" 
-                    value={completionDate}
-                    onChange={(e) => setCompletionDate(e.target.value)}
-                    className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none mb-6"
-                />
-                <div className="flex justify-end gap-4">
+                <div className="flex justify-center mb-4"><ExclamationIcon /></div>
+                <h3 className="text-xl font-bold text-center text-red-500 mb-4">Confirm Deletion</h3>
+                <p className="text-center text-gray-300 mb-6">{message}</p>
+                <div className="flex justify-between">
                     <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
-                    <button onClick={handleConfirm} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Confirm Completion</button>
+                    <button onClick={onConfirm} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete</button>
                 </div>
-            </div>
-        </div>
-    );
-};
-
-const MessageModal = ({ isOpen, onClose, title, children }) => {
-    if (!isOpen) return null;
-    return (
-         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
-            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 text-center">
-                <h3 className="text-2xl font-bold text-cyan-400 mb-4">{title}</h3>
-                <div className="text-gray-300 mb-6">{children}</div>
-                <button onClick={onClose} className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">OK</button>
             </div>
         </div>
     );
 }
 
-const Header = ({ user }) => (
-    <header className="mb-8 text-center md:text-left">
-        <h2 className="text-2xl font-semibold text-gray-300">SHRI GURUNANAK INDUSTRIES</h2>
-        <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
-        {user && (
-          <div className="mt-2 text-xs text-yellow-300">
-            <p>Logged in as: {user.email}</p>
-          </div>
-        )}
-        <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
-    </header>
-);
+function MarkCompleteModal({ isOpen, onClose, onConfirm }) {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Mark as Complete</h3>
+                <p className="text-gray-300 mb-6">Are you sure you want to mark this job as complete? This will update its status.</p>
+                <div className="flex justify-between">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button onClick={onConfirm} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Confirm</button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
-const Nav = ({ view, setView }) => (
-    <nav className="flex flex-wrap space-x-2 md:space-x-4 border-b border-gray-700 pb-2">
-        <NavButton text="Stock Inventory" isActive={view === 'stock'} onClick={() => setView('stock')} />
-        <NavButton text="Job Management" isActive={view === 'jobs'} onClick={() => setView('jobs')} />
-        <NavButton text="Orders" isActive={view === 'orders'} onClick={() => setView('orders')} />
-        <NavButton text="Use Stock" isActive={view === 'use_stock'} onClick={() => setView('use_stock')} />
-        <NavButton text="Film History" isActive={view === 'film_history'} onClick={() => setView('film_history')} />
-    </nav>
-);
+function MessageModal({ isOpen, onClose, title, body }) {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">{title}</h3>
+                <p className="text-gray-300 mb-6">{body}</p>
+                <div className="flex justify-end">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Close</button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
-const NavButton = ({ text, isActive, onClick }) => (
-    <button onClick={onClick} className={`px-3 py-2 rounded-t-lg text-sm md:text-base font-semibold transition-colors duration-200 focus:outline-none ${isActive ? 'bg-gray-800 text-cyan-400 border-b-2 border-cyan-400' : 'text-gray-400 hover:bg-gray-800'}`}>{text}</button>
-);
+function Header({ onSignOut }) {
+    return (
+        <header className="bg-gray-800 p-4 shadow-md">
+            <div className="container mx-auto flex justify-between items-center">
+                <h1 className="text-2xl font-bold text-cyan-400">Film Inventory Management</h1>
+                <button onClick={onSignOut} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Sign Out</button>
+            </div>
+        </header>
+    );
+}
+
+function Nav({ activeSection, setActiveSection }) {
+    return (
+        <nav className="bg-gray-800 p-4 shadow-md">
+            <div className="container mx-auto flex space-x-4">
+                <NavButton section="filmInventory" activeSection={activeSection} setActiveSection={setActiveSection} icon={<PackageIcon />} label="Film Inventory" />
+                <NavButton section="jobManagement" activeSection={activeSection} setActiveSection={setActiveSection} icon={<ClipboardListIcon />} label="Job Management" />
+                <NavButton section="orderManagement" activeSection={activeSection} setActiveSection={setActiveSection} icon={<ClipboardListIcon />} label="Order Management" />
+                <NavButton section="filmHistory" activeSection={activeSection} setActiveSection={setActiveSection} icon={<HistoryIcon />} label="Film History" />
+            </div>
+        </nav>
+    );
+}
+
+function NavButton({ section, activeSection, setActiveSection, icon, label }) {
+    return (
+        <button
+            onClick={() => setActiveSection(section)}
+            className={`flex items-center px-4 py-2 rounded-lg ${activeSection === section ? 'bg-cyan-500 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+        >
+            {icon}
+            <span>{label}</span>
+        </button>
+    );
+}
 
 // --- FILM INVENTORY COMPONENTS ---
 function FilmInventory({ films, db, userId }) {
     const [showForm, setShowForm] = useState(false);
     const [editingFilm, setEditingFilm] = useState(null);
-    const [selectedCategory, setSelectedCategory] = useState(null);
-    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [isDeleteModalOpen, setDeleteModalOpen] = useState(false);
     const [filmToDelete, setFilmToDelete] = useState(null);
 
     const handleFormSubmit = async (filmData) => {
         if (!db || !userId) return;
         const filmsCollectionPath = `artifacts/${appId}/users/${userId}/films`;
-        
+
         const dataToSave = {
             ...filmData,
             purchaseDate: new Date(filmData.purchaseDate + 'T00:00:00Z'),
@@ -326,77 +309,44 @@ function FilmInventory({ films, db, userId }) {
         } catch (error) { console.error("Error saving film:", error); }
     };
 
-    const openDeleteModal = (film) => {
-        setFilmToDelete(film);
-        setIsDeleteModalOpen(true);
-    };
-
-    const closeDeleteModal = () => {
-        setFilmToDelete(null);
-        setIsDeleteModalOpen(false);
-    };
-
-    const executeDelete = async () => {
-        if (!db || !userId || !filmToDelete) return;
-        try {
-            await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/films`, filmToDelete.id));
-        } catch (error) { console.error("Error deleting film:", error); }
-        finally {
-            closeDeleteModal();
-        }
-    };
-
-    const handleEdit = (film) => {
+    const handleEditFilm = (film) => {
         setEditingFilm(film);
         setShowForm(true);
     };
 
-    const closeForm = () => {
-        setShowForm(false);
-        setEditingFilm(null);
+    const handleDeleteFilm = async () => {
+        if (!filmToDelete || !db) return;
+        try {
+            await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/films`, filmToDelete.id));
+            setDeleteModalOpen(false);
+            setFilmToDelete(null);
+        } catch (error) { console.error("Error deleting film:", error); }
     };
-
-    const filmCategories = films.reduce((acc, film) => {
-        const key = film.filmType || 'Uncategorized';
-        if (!acc[key]) {
-            acc[key] = [];
-        }
-        acc[key].push(film);
-        return acc;
-    }, {});
 
     return (
         <section>
-            <ConfirmationModal 
-                isOpen={isDeleteModalOpen}
-                onClose={closeDeleteModal}
-                onConfirm={executeDelete}
-                title="Delete Film Roll?"
-            >
-              <p>Are you sure you want to delete this <strong className="text-white">{filmToDelete?.filmType}</strong> roll?</p>
-              <p className="mt-2">This action cannot be undone.</p>
-            </ConfirmationModal>
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-semibold text-gray-200">
-                    {selectedCategory ? `Category: ${selectedCategory}` : 'Film Stock by Category'}
-                </h2>
-                <button onClick={() => { setEditingFilm(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
-                    <PlusIcon /><span className="ml-2 hidden md:inline">Add New Roll</span>
-                </button>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-cyan-400">Film Inventory</h2>
+                <button onClick={() => { setEditingFilm(null); setShowForm(true); }} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg flex items-center"><PlusIcon /><span className="ml-2">Add Film</span></button>
             </div>
-            
-            {showForm && <FilmForm onSubmit={handleFormSubmit} onCancel={closeForm} initialData={editingFilm} />}
-            
-            {selectedCategory ? (
-                <div>
-                    <button onClick={() => setSelectedCategory(null)} className="flex items-center mb-4 text-cyan-400 hover:text-cyan-300">
-                        <ChevronLeftIcon /> Back to Categories
-                    </button>
-                    <FilmList films={filmCategories[selectedCategory] || []} onEdit={handleEdit} onDelete={openDeleteModal} />
-                </div>
-            ) : (
-                <CategoryList categories={filmCategories} onSelectCategory={setSelectedCategory} />
+            {showForm && (
+                <FilmForm
+                    onSubmit={handleFormSubmit}
+                    onCancel={() => setShowForm(false)}
+                    initialData={editingFilm}
+                />
             )}
+            <FilmList
+                films={films}
+                onEdit={handleEditFilm}
+                onDelete={(film) => { setFilmToDelete(film); setDeleteModalOpen(true); }}
+            />
+            <ConfirmationModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setDeleteModalOpen(false)}
+                onConfirm={handleDeleteFilm}
+                message="Are you sure you want to delete this film? This action cannot be undone."
+            />
         </section>
     );
 }
@@ -409,31 +359,79 @@ function FilmForm({ onSubmit, onCancel, initialData }) {
         if (initialData) {
             const purchaseDate = initialData.purchaseDate?.toDate ? toYYYYMMDD(initialData.purchaseDate.toDate()) : defaultState.purchaseDate;
             setFormData({
-                filmType: initialData.filmType || '', netWeight: initialData.netWeight || '',
+                filmType: initialData.filmType || '',
+                netWeight: initialData.netWeight || '',
                 supplier: initialData.supplier || '',
                 purchaseDate: purchaseDate,
             });
-        } else { setFormData(defaultState); }
+        } else {
+            setFormData(defaultState);
+        }
     }, [initialData]);
 
-    const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit({ ...formData, netWeight: parseFloat(formData.netWeight) || 0, filmType: formData.filmType.trim() });
+        onSubmit(formData);
     };
 
     return (
-        <div className="bg-gray-800 p-6 rounded-lg mb-8 shadow-lg">
-            <h3 className="text-xl font-semibold mb-4 text-cyan-400">{initialData ? 'Edit Film Roll' : 'Add New Film Roll'}</h3>
-            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input name="filmType" value={formData.filmType} onChange={handleChange} placeholder="Film Type (e.g., 12*610 PET)" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <input name="netWeight" type="number" step="0.01" value={formData.netWeight} onChange={handleChange} placeholder="Net Weight (kg)" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <input name="supplier" value={formData.supplier} onChange={handleChange} placeholder="Supplier" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <input name="purchaseDate" type="date" value={formData.purchaseDate} onChange={handleChange} required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <div className="flex items-center space-x-4 md:col-span-2">
-                    <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">{initialData ? 'Update Roll' : 'Add Roll'}</button>
-                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">Cancel</button>
+        <div className="bg-gray-800 p-6 rounded-lg shadow-md mb-6">
+            <h3 className="text-xl font-bold text-cyan-400 mb-4">{initialData ? 'Edit Film' : 'Add New Film'}</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Film Type</label>
+                    <input
+                        type="text"
+                        name="filmType"
+                        value={formData.filmType}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Net Weight (kg)</label>
+                    <input
+                        type="number"
+                        name="netWeight"
+                        value={formData.netWeight}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                        min="0"
+                        step="0.01"
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Supplier</label>
+                    <input
+                        type="text"
+                        name="supplier"
+                        value={formData.supplier}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Purchase Date</label>
+                    <input
+                        type="date"
+                        name="purchaseDate"
+                        value={formData.purchaseDate}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    />
+                </div>
+                <div className="flex justify-end space-x-4">
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Save</button>
                 </div>
             </form>
         </div>
@@ -444,19 +442,29 @@ function FilmList({ films, onEdit, onDelete }) {
     return (
         <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-md">
             <table className="w-full text-left">
-                <thead className="bg-gray-700"><tr>
-                    <th className="p-3">Film Type</th><th className="p-3">Current Wt. (kg)</th><th className="p-3">Supplier</th>
-                    <th className="p-3">Purchase Date</th><th className="p-3">Actions</th>
-                </tr></thead>
+                <thead className="bg-gray-700">
+                    <tr>
+                        <th className="p-3">Film Type</th>
+                        <th className="p-3">Net Weight (kg)</th>
+                        <th className="p-3">Current Weight (kg)</th>
+                        <th className="p-3">Supplier</th>
+                        <th className="p-3">Purchase Date</th>
+                        <th className="p-3">Actions</th>
+                    </tr>
+                </thead>
                 <tbody>
                     {films.map(film => (
                         <tr key={film.id} className="border-b border-gray-700 hover:bg-gray-700/50">
-                            <td className="p-3 font-medium">{film.filmType}</td><td className="p-3">{film.currentWeight?.toFixed(2)}</td>
+                            <td className="p-3">{film.filmType}</td>
+                            <td className="p-3">{film.netWeight.toFixed(2)}</td>
+                            <td className="p-3">{film.currentWeight.toFixed(2)}</td>
                             <td className="p-3">{film.supplier}</td>
                             <td className="p-3">{toDDMMYYYY(film.purchaseDate?.toDate())}</td>
-                            <td className="p-3 flex space-x-2">
-                                <button onClick={() => onEdit(film)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                                <button onClick={() => onDelete(film)} className="text-red-500 hover:text-red-400"><TrashIcon /></button>
+                            <td className="p-3">
+                                <div className="flex space-x-3">
+                                    <button onClick={() => onEdit(film)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                                    <button onClick={() => onDelete(film)} className="text-red-400 hover:text-red-300"><TrashIcon /></button>
+                                </div>
                             </td>
                         </tr>
                     ))}
@@ -466,28 +474,81 @@ function FilmList({ films, onEdit, onDelete }) {
     );
 }
 
-function CategoryList({ categories, onSelectCategory }) {
-    const sortedCategories = Object.keys(categories).sort();
-    if (sortedCategories.length === 0) return <p className="text-center text-gray-500 py-8">No film rolls in stock. Add one to get started!</p>;
+function CategoryList({ films }) {
+    const categories = useMemo(() => {
+        const grouped = films.reduce((acc, film) => {
+            const type = film.filmType || 'Uncategorized';
+            acc[type] = (acc[type] || 0) + film.currentWeight;
+            return acc;
+        }, {});
+        return Object.entries(grouped).map(([type, weight]) => ({ type, weight }));
+    }, [films]);
+
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedCategories.map(categoryName => {
-                const rolls = categories[categoryName];
-                const totalWeight = rolls.reduce((sum, roll) => sum + (roll.currentWeight || 0), 0);
-                return (
-                    <div key={categoryName} onClick={() => onSelectCategory(categoryName)} className="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700 hover:shadow-cyan-500/10 shadow-lg transition-all">
-                        <h3 className="text-xl font-bold text-cyan-400">{categoryName}</h3>
-                        <p className="text-gray-300">{rolls.length} Roll(s)</p>
-                        <p className="text-gray-400 text-sm mt-2">Total Weight: {totalWeight.toFixed(2)} kg</p>
-                    </div>
-                );
-            })}
+        <div className="mt-6 bg-gray-800 rounded-lg shadow-md p-4">
+            <h3 className="text-xl font-bold text-cyan-400 mb-4">Film Categories</h3>
+            <ul className="space-y-2">
+                {categories.map(cat => (
+                    <li key={cat.type} className="flex justify-between p-2 bg-gray-700 rounded-md">
+                        <span>{cat.type}</span>
+                        <span>{cat.weight.toFixed(2)} kg</span>
+                    </li>
+                ))}
+            </ul>
         </div>
     );
 }
 
-
 // --- JOB MANAGEMENT COMPONENTS ---
+function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
+    const [consumedAt, setConsumedAt] = useState('');
+
+    useEffect(() => {
+        if (historyEntry) {
+            const dateStr = toYYYYMMDD(historyEntry.consumedAt.toDate());
+            setConsumedAt(dateStr);
+            console.log("Setting consumedAt:", dateStr);
+        }
+    }, [historyEntry]);
+
+    if (!isOpen) return null;
+
+    const handleDelete = () => {
+        if (window.confirm("Are you sure you want to delete this history entry? This cannot be undone.")) {
+            onDelete(historyEntry.id);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Film Type</label>
+                        <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.filmType}</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
+                        <input
+                            type="date"
+                            value={consumedAt}
+                            onChange={(e) => setConsumedAt(e.target.value)}
+                            className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        />
+                    </div>
+                </div>
+                <div className="flex justify-between mt-6 gap-4">
+                    <button onClick={handleDelete} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete Entry</button>
+                    <div>
+                        <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg mr-2">Cancel</button>
+                        <button onClick={() => { console.log("Saving with new date:", consumedAt); onSave(historyEntry.id, consumedAt); }} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function JobManagement({ films, jobs, orders, db, userId }) {
     const [showForm, setShowForm] = useState(false);
@@ -496,13 +557,13 @@ function JobManagement({ films, jobs, orders, db, userId }) {
     const [isDeleteModalOpen, setDeleteModalOpen] = useState(false);
     const [jobToDelete, setJobToDelete] = useState(null);
     const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
-    const [messageModalContent, setMessageModalContent] = useState({title: '', body: ''});
+    const [messageModalContent, setMessageModalContent] = useState({ title: '', body: '' });
 
     const handleJobSubmit = async (jobData) => {
         if (!db || !userId) return;
         const jobsCollectionPath = `artifacts/${appId}/users/${userId}/jobs`;
         try {
-             if (editingJob) {
+            if (editingJob) {
                 const jobRef = doc(db, jobsCollectionPath, editingJob.id);
                 await updateDoc(jobRef, jobData);
                 setEditingJob(null);
@@ -518,187 +579,216 @@ function JobManagement({ films, jobs, orders, db, userId }) {
         setShowForm(true);
     };
 
-    const openDeleteModal = (job) => {
-        const isJobInActiveOrder = orders.some(order => order.jobId === job.id && order.status === 'active');
-        if (isJobInActiveOrder) {
-            setMessageModalContent({
-                title: 'Deletion Prevented',
-                body: 'This job is linked to an active order. Please complete or delete the order before deleting this job.'
-            });
-            setIsMessageModalOpen(true);
-        } else {
-            setJobToDelete(job);
-            setDeleteModalOpen(true);
-        }
-    };
-
-    const closeDeleteModal = () => {
-        setJobToDelete(null);
-        setDeleteModalOpen(false);
-    };
-
-    const executeDeleteJob = async () => {
-        if (!jobToDelete || !db || !userId) return;
-        
-        const jobRef = doc(db, `artifacts/${appId}/users/${userId}/jobs`, jobToDelete.id);
-        const historyCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/jobs/${jobToDelete.id}/consumedRolls`);
-        
+    const handleDeleteJob = async () => {
+        if (!jobToDelete || !db) return;
         try {
-            const historySnapshot = await getDocs(historyCollectionRef);
+            const jobRef = doc(db, `artifacts/${appId}/users/${userId}/jobs`, jobToDelete.id);
+            const consumedRollsRef = collection(db, `artifacts/${appId}/users/${userId}/jobs/${jobToDelete.id}/consumedRolls`);
             const batch = writeBatch(db);
-            historySnapshot.docs.forEach((doc) => {
-                batch.delete(doc.ref);
-            });
+            const consumedRolls = await getDocs(consumedRollsRef);
+            consumedRolls.forEach(doc => batch.delete(doc.ref));
             batch.delete(jobRef);
             await batch.commit();
-        } catch (error) {
-            console.error("Error deleting job and its history:", error);
-        } finally {
-            closeDeleteModal();
-        }
+            setDeleteModalOpen(false);
+            setJobToDelete(null);
+        } catch (error) { console.error("Error deleting job:", error); }
     };
-    
-    const filteredJobs = jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs;
+
+    const filteredJobs = jobs.filter(job =>
+        job.jobName.toLowerCase().includes(jobSearch.toLowerCase()) ||
+        job.orderId?.toLowerCase().includes(jobSearch.toLowerCase())
+    );
 
     return (
         <section>
-            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                <h2 className="text-2xl font-semibold text-gray-200">Production Jobs (Memo)</h2>
-                 <div className="relative w-full md:w-1/3">
-                    <input type="text" value={jobSearch} onChange={e => setJobSearch(e.target.value)} placeholder="Search jobs..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"/>
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-cyan-400">Job Management</h2>
+                <div className="flex items-center space-x-4">
+                    <div className="relative">
+                        <input
+                            type="text"
+                            placeholder="Search jobs..."
+                            value={jobSearch}
+                            onChange={(e) => setJobSearch(e.target.value)}
+                            className="pl-10 pr-4 py-2 bg-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        />
+                        <div className="absolute inset-y-0 left-0 flex items-center pl-3"><SearchIcon /></div>
+                    </div>
+                    <button onClick={() => { setEditingJob(null); setShowForm(true); }} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg flex items-center"><PlusIcon /><span className="ml-2">Add Job</span></button>
                 </div>
-                <button onClick={() => { setEditingJob(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
-                    <PlusIcon /><span className="ml-2 hidden md:inline">Add New Job</span>
-                </button>
             </div>
-            {showForm && <JobForm films={films} onSubmit={handleJobSubmit} onCancel={() => { setShowForm(false); setEditingJob(null); }} initialData={editingJob} />}
-            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} />
+            {showForm && (
+                <JobForm
+                    films={films}
+                    orders={orders}
+                    onSubmit={handleJobSubmit}
+                    onCancel={() => setShowForm(false)}
+                    initialData={editingJob}
+                    db={db}
+                    userId={userId}
+                />
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredJobs.map(job => (
+                    <JobCard
+                        key={job.id}
+                        job={job}
+                        films={films}
+                        onEdit={handleEditJob}
+                        onDelete={(job) => { setJobToDelete(job); setDeleteModalOpen(true); }}
+                        db={db}
+                        userId={userId}
+                    />
+                ))}
+            </div>
             <ConfirmationModal
                 isOpen={isDeleteModalOpen}
-                onClose={closeDeleteModal}
-                onConfirm={executeDeleteJob}
-                title="Delete Job?"
-            >
-                <p>Are you sure you want to delete the job <strong className="text-white">{jobToDelete?.jobName}</strong>?</p>
-                <p className="mt-2">This will also delete its entire consumption history. This action cannot be undone.</p>
-            </ConfirmationModal>
+                onClose={() => setDeleteModalOpen(false)}
+                onConfirm={handleDeleteJob}
+                message="Are you sure you want to delete this job and all its consumed rolls? This action cannot be undone."
+            />
             <MessageModal
                 isOpen={isMessageModalOpen}
                 onClose={() => setIsMessageModalOpen(false)}
                 title={messageModalContent.title}
-            >
-                {messageModalContent.body}
-            </MessageModal>
+                body={messageModalContent.body}
+            />
         </section>
     );
 }
 
-function JobForm({ onSubmit, onCancel, films, initialData }) {
-    const [jobName, setJobName] = useState('');
-    const [jobSize, setJobSize] = useState('');
-    const [materials, setMaterials] = useState(['']);
-    const [activeMaterialIndex, setActiveMaterialIndex] = useState(null);
-    const materialsRef = useRef(null);
+function JobForm({ films, orders, onSubmit, onCancel, initialData, db, userId }) {
+    const [formData, setFormData] = useState({
+        jobName: '',
+        orderId: '',
+        filmId: '',
+        filmWeight: '',
+        completed: false,
+        completedAt: ''
+    });
+    const [isCompleteModalOpen, setCompleteModalOpen] = useState(false);
 
     useEffect(() => {
         if (initialData) {
-            setJobName(initialData.jobName || '');
-            setJobSize(initialData.jobSize || '');
-            setMaterials(initialData.materials && initialData.materials.length > 0 ? initialData.materials : ['']);
-        } else {
-            setJobName('');
-            setJobSize('');
-            setMaterials(['']);
+            setFormData({
+                jobName: initialData.jobName || '',
+                orderId: initialData.orderId || '',
+                filmId: initialData.filmId || '',
+                filmWeight: initialData.filmWeight || '',
+                completed: initialData.completed || false,
+                completedAt: initialData.completedAt ? toYYYYMMDD(initialData.completedAt.toDate()) : ''
+            });
         }
     }, [initialData]);
 
-    useEffect(() => {
-        function handleClickOutside(event) {
-            if (materialsRef.current && !materialsRef.current.contains(event.target)) {
-                setActiveMaterialIndex(null);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside);
-        };
-    }, [materialsRef]);
-
-    const availableFilmTypes = useMemo(() => {
-        if (!films) return [];
-        return [...new Set(films.map(f => f.filmType.trim()).filter(Boolean))].sort();
-    }, [films]);
-        
-    const addMaterial = () => setMaterials([...materials, '']);
-    const handleMaterialChange = (index, value) => {
-        const newMaterials = [...materials];
-        newMaterials[index] = value;
-        setMaterials(newMaterials);
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
     };
-    const removeMaterial = (index) => setMaterials(materials.filter((_, i) => i !== index));
+
+    const handleComplete = async () => {
+        if (!db || !userId || !initialData) return;
+        try {
+            const jobRef = doc(db, `artifacts/${appId}/users/${userId}/jobs`, initialData.id);
+            await updateDoc(jobRef, {
+                completed: true,
+                completedAt: new Date()
+            });
+            setCompleteModalOpen(false);
+            onCancel();
+        } catch (error) { console.error("Error marking job as complete:", error); }
+    };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit({ jobName, jobSize, materials: materials.map(m => m.trim()).filter(m => m !== '') });
+        onSubmit({
+            ...formData,
+            filmWeight: parseFloat(formData.filmWeight) || 0,
+            completed: formData.completed,
+            completedAt: formData.completed ? (formData.completedAt ? new Date(formData.completedAt + 'T00:00:00Z') : new Date()) : null
+        });
     };
 
     return (
-        <div className="bg-gray-800 p-6 rounded-lg mb-8 shadow-lg">
-            <h3 className="text-xl font-semibold mb-4 text-cyan-400">{initialData ? 'Edit Job' : 'Add New Job'}</h3>
+        <div className="bg-gray-800 p-6 rounded-lg shadow-md mb-6">
+            <h3 className="text-xl font-bold text-cyan-400 mb-4">{initialData ? 'Edit Job' : 'Add New Job'}</h3>
             <form onSubmit={handleSubmit} className="space-y-4">
-                <input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job Name" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <input value={jobSize} onChange={e => setJobSize(e.target.value)} placeholder="Job Size (e.g., 100,000 meters)" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <div ref={materialsRef}>
-                    <h4 className="font-semibold text-gray-300">Required Materials (select from inventory)</h4>
-                    {materials.map((material, index) => {
-                         const filteredTypes = material ? availableFilmTypes.filter(type => type.toLowerCase().includes(material.toLowerCase())) : [];
-                         return (
-                            <div key={index} className="flex items-center space-x-2 mt-2">
-                                <div className="relative w-full">
-                                    <input value={material}
-                                        onChange={e => handleMaterialChange(index, e.target.value)}
-                                        onFocus={() => setActiveMaterialIndex(index)}
-                                        placeholder="Type to search film..."
-                                        autoComplete="off"
-                                        className="w-full bg-gray-700 p-2 rounded-md" />
-                                    {activeMaterialIndex === index && material && (
-                                        <div className="absolute z-20 w-full mt-1 bg-gray-600 border border-gray-500 rounded-md shadow-lg max-h-40 overflow-y-auto">
-                                            {filteredTypes.length > 0 ? (
-                                                filteredTypes.map(type => (
-                                                    <div key={type}
-                                                        onClick={() => {
-                                                            handleMaterialChange(index, type);
-                                                            setActiveMaterialIndex(null);
-                                                        }}
-                                                        className="p-2 cursor-pointer hover:bg-cyan-600">
-                                                        {type}
-                                                    </div>
-                                                ))
-                                            ) : (
-                                                <div className="p-2 text-gray-400">No matching film types found.</div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                                <button type="button" onClick={() => removeMaterial(index)} className="text-red-500 hover:text-red-400 p-2 rounded-full bg-gray-700"><TrashIcon /></button>
-                            </div>
-                         );
-                    })}
-                    <button type="button" onClick={addMaterial} className="mt-2 text-cyan-400 hover:text-cyan-300 text-sm">+ Add Material</button>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Job Name</label>
+                    <input
+                        type="text"
+                        name="jobName"
+                        value={formData.jobName}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    />
                 </div>
-                <div className="flex items-center space-x-4 pt-2">
-                    <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full">{initialData ? 'Update Job' : 'Create Job'}</button>
-                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Order ID</label>
+                    <select
+                        name="orderId"
+                        value={formData.orderId}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    >
+                        <option value="">Select an order</option>
+                        {orders.map(order => (
+                            <option key={order.id} value={order.id}>{order.orderName}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Film</label>
+                    <select
+                        name="filmId"
+                        value={formData.filmId}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    >
+                        <option value="">Select a film</option>
+                        {films.map(film => (
+                            <option key={film.id} value={film.id}>{film.filmType} ({film.currentWeight.toFixed(2)} kg)</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Film Weight to Use (kg)</label>
+                    <input
+                        type="number"
+                        name="filmWeight"
+                        value={formData.filmWeight}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                        min="0"
+                        step="0.01"
+                    />
+                </div>
+                {initialData && !formData.completed && (
+                    <div>
+                        <button
+                            type="button"
+                            onClick={() => setCompleteModalOpen(true)}
+                            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg"
+                        >
+                            Mark as Complete
+                        </button>
+                    </div>
+                )}
+                <div className="flex justify-end space-x-4">
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Save</button>
                 </div>
             </form>
+            <MarkCompleteModal
+                isOpen={isCompleteModalOpen}
+                onClose={() => setCompleteModalOpen(false)}
+                onConfirm={handleComplete}
+            />
         </div>
     );
-}
-
-function JobList({ films, jobs, onDelete, onEdit, db, userId }) {
-    if (jobs.length === 0) return <p className="text-center text-gray-500 py-8">No jobs found.</p>;
-    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} />)}</div>;
 }
 
 function JobCard({ job, films, onDelete, onEdit, db, userId }) {
@@ -711,7 +801,11 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
     const toggleHistory = () => {
         setShowHistory(prev => !prev);
     };
-    
+
+    const toggleStock = () => {
+        setShowStock(prev => !prev);
+    };
+
     useEffect(() => {
         if (!showHistory || !db || !userId) return;
 
@@ -735,7 +829,7 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
             console.error("Error updating history entry:", error);
         }
     };
-    
+
     const handleDeleteHistory = async (historyId) => {
         const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`, historyId);
         try {
@@ -746,29 +840,32 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
         }
     };
 
+    const selectedFilm = films.find(film => film.id === job.filmId);
+
     return (
         <>
             <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-gray-600">
                 <div className="flex justify-between items-start">
                     <div>
-                        <h3 className="font-bold text-xl text-gray-100">{job.jobName}</h3>
-                        <p className="text-gray-400">{job.jobSize}</p>
-                        <p className="text-xs text-gray-500">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
+                        <h3 className="text-lg font-bold text-cyan-400">{job.jobName}</h3>
+                        <p className="text-sm text-gray-400">Order: {job.orderId || 'N/A'}</p>
+                        <p className="text-sm text-gray-400">Film: {selectedFilm ? selectedFilm.filmType : 'N/A'}</p>
+                        <p className="text-sm text-gray-400">Weight: {job.filmWeight.toFixed(2)} kg</p>
+                        {job.completed && (
+                            <p className="text-xs text-green-400 mt-1 flex items-center">
+                                <CheckCircleIcon className="mr-1" /> Completed: {toDDMMYYYY(job.completedAt?.toDate())}
+                            </p>
+                        )}
                     </div>
                     <div className="flex items-center space-x-3">
-                         <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                         <button onClick={() => setShowStock(!showStock)} className="flex items-center text-sm text-yellow-400 hover:text-yellow-300 transition-colors">
-                            <ClipboardListIcon />
-                            <span className="ml-1">{showStock ? 'Hide' : 'View'} Stock</span>
-                         </button>
-                         <button onClick={toggleHistory} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors">
-                            <HistoryIcon />
-                            <span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span>
-                        </button>
-                        <button onClick={() => onDelete(job)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
+                        <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                        <button onClick={() => onDelete(job)} className="text-red-400 hover:text-red-300"><TrashIcon /></button>
                     </div>
                 </div>
-                {/* ... */}
+                <div className="mt-4 flex space-x-4">
+                    <button onClick={toggleHistory} className="text-cyan-400 hover:text-cyan-300 flex items-center"><HistoryIcon className="mr-1" />{showHistory ? 'Hide' : 'Show'} History</button>
+                    <button onClick={toggleStock} className="text-cyan-400 hover:text-cyan-300 flex items-center"><PackageIcon />{showStock ? 'Hide' : 'Show'} Stock</button>
+                </div>
                 {showHistory && (
                     <div className="mt-4 border-t border-gray-700 pt-4">
                         <h4 className="font-semibold text-lg text-cyan-400 mb-2">Consumed Roll History</h4>
@@ -789,8 +886,17 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
                         )}
                     </div>
                 )}
+                {showStock && selectedFilm && (
+                    <div className="mt-4 border-t border-gray-700 pt-4">
+                        <h4 className="font-semibold text-lg text-cyan-400 mb-2">Current Stock</h4>
+                        <p>Film Type: {selectedFilm.filmType}</p>
+                        <p>Current Weight: {selectedFilm.currentWeight.toFixed(2)} kg</p>
+                        <p>Supplier: {selectedFilm.supplier}</p>
+                        <p>Purchase Date: {toDDMMYYYY(selectedFilm.purchaseDate?.toDate())}</p>
+                    </div>
+                )}
             </div>
-            <EditHistoryModal 
+            <EditHistoryModal
                 isOpen={!!editingHistoryEntry}
                 onClose={() => setEditingHistoryEntry(null)}
                 onSave={handleUpdateHistory}
@@ -801,18 +907,254 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
     );
 }
 
-// ... (OrderManagement, UseStock, etc. have been updated for date formatting) ...
+function RollDetailModal({ isOpen, onClose, onConfirm, films, db, userId, job }) {
+    const [selectedFilmId, setSelectedFilmId] = useState('');
+    const [weight, setWeight] = useState('');
+    const [consumedAt, setConsumedAt] = useState(toYYYYMMDD(new Date()));
 
-function OrderCard({ order, jobs, films, onDelete, onComplete, db, userId }) {
-    // ...
+    if (!isOpen) return null;
+
+    const handleConfirm = async () => {
+        if (!selectedFilmId || !weight || !db || !userId) return;
+        const film = films.find(f => f.id === selectedFilmId);
+        if (!film) return;
+
+        try {
+            const filmRef = doc(db, `artifacts/${appId}/users/${userId}/films`, selectedFilmId);
+            const historyRef = collection(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`);
+            const batch = writeBatch(db);
+            batch.update(filmRef, { currentWeight: film.currentWeight - parseFloat(weight) });
+            batch.add(historyRef, {
+                filmType: film.filmType,
+                supplier: film.supplier,
+                netWeight: parseFloat(weight),
+                consumedAt: new Date(consumedAt + 'T00:00:00Z')
+            });
+            await batch.commit();
+            onConfirm();
+            setSelectedFilmId('');
+            setWeight('');
+            setConsumedAt(toYYYYMMDD(new Date()));
+        } catch (error) { console.error("Error consuming roll:", error); }
+    };
+
     return (
-        // ...
-        <p className="text-xs text-gray-500 mt-1">Ordered: {toDDMMYYYY(order.createdAt?.toDate())}</p>
-        {order.status === 'completed' && <p className="text-xs text-purple-400 mt-1">Completed: {toDDMMYYYY(order.completedAt?.toDate())}</p>}
-        // ...
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Consume Roll</h3>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300">Film</label>
+                        <select
+                            value={selectedFilmId}
+                            onChange={(e) => setSelectedFilmId(e.target.value)}
+                            className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                            required
+                        >
+                            <option value="">Select a film</option>
+                            {films.map(film => (
+                                <option key={film.id} value={film.id}>{film.filmType} ({film.currentWeight.toFixed(2)} kg)</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300">Weight to Consume (kg)</label>
+                        <input
+                            type="number"
+                            value={weight}
+                            onChange={(e) => setWeight(e.target.value)}
+                            className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                            required
+                            min="0"
+                            step="0.01"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300">Date of Use</label>
+                        <input
+                            type="date"
+                            value={consumedAt}
+                            onChange={(e) => setConsumedAt(e.target.value)}
+                            className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                            required
+                        />
+                    </div>
+                </div>
+                <div className="flex justify-end mt-6 space-x-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button onClick={handleConfirm} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Consume</button>
+                </div>
+            </div>
+        </div>
     );
 }
 
+// --- ORDER MANAGEMENT COMPONENTS ---
+function OrderManagement({ orders, jobs, db, userId }) {
+    const [showForm, setShowForm] = useState(false);
+    const [editingOrder, setEditingOrder] = useState(null);
+    const [isDeleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [orderToDelete, setOrderToDelete] = useState(null);
+
+    const handleOrderSubmit = async (orderData) => {
+        if (!db || !userId) return;
+        const ordersCollectionPath = `artifacts/${appId}/users/${userId}/orders`;
+        try {
+            if (editingOrder) {
+                const orderRef = doc(db, ordersCollectionPath, editingOrder.id);
+                await updateDoc(orderRef, orderData);
+                setEditingOrder(null);
+            } else {
+                await addDoc(collection(db, ordersCollectionPath), { ...orderData, createdAt: new Date() });
+            }
+            setShowForm(false);
+        } catch (error) { console.error("Error saving order:", error); }
+    };
+
+    const handleEditOrder = (order) => {
+        setEditingOrder(order);
+        setShowForm(true);
+    };
+
+    const handleDeleteOrder = async () => {
+        if (!orderToDelete || !db) return;
+        try {
+            await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/orders`, orderToDelete.id));
+            setDeleteModalOpen(false);
+            setOrderToDelete(null);
+        } catch (error) { console.error("Error deleting order:", error); }
+    };
+
+    return (
+        <section>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-cyan-400">Order Management</h2>
+                <button onClick={() => { setEditingOrder(null); setShowForm(true); }} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg flex items-center"><PlusIcon /><span className="ml-2">Add Order</span></button>
+            </div>
+            {showForm && (
+                <OrderForm
+                    onSubmit={handleOrderSubmit}
+                    onCancel={() => setShowForm(false)}
+                    initialData={editingOrder}
+                />
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {orders.map(order => (
+                    <OrderCard
+                        key={order.id}
+                        order={order}
+                        jobs={jobs}
+                        onEdit={handleEditOrder}
+                        onDelete={(order) => { setOrderToDelete(order); setDeleteModalOpen(true); }}
+                    />
+                ))}
+            </div>
+            <ConfirmationModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setDeleteModalOpen(false)}
+                onConfirm={handleDeleteOrder}
+                message="Are you sure you want to delete this order? This action cannot be undone."
+            />
+        </section>
+    );
+}
+
+function OrderForm({ onSubmit, onCancel, initialData }) {
+    const [formData, setFormData] = useState({
+        orderName: '',
+        clientName: '',
+        dueDate: toYYYYMMDD(new Date())
+    });
+
+    useEffect(() => {
+        if (initialData) {
+            setFormData({
+                orderName: initialData.orderName || '',
+                clientName: initialData.clientName || '',
+                dueDate: initialData.dueDate ? toYYYYMMDD(initialData.dueDate.toDate()) : toYYYYMMDD(new Date())
+            });
+        }
+    }, [initialData]);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSubmit({
+            ...formData,
+            dueDate: new Date(formData.dueDate + 'T00:00:00Z')
+        });
+    };
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg shadow-md mb-6">
+            <h3 className="text-xl font-bold text-cyan-400 mb-4">{initialData ? 'Edit Order' : 'Add New Order'}</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Order Name</label>
+                    <input
+                        type="text"
+                        name="orderName"
+                        value={formData.orderName}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Client Name</label>
+                    <input
+                        type="text"
+                        name="clientName"
+                        value={formData.clientName}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-300">Due Date</label>
+                    <input
+                        type="date"
+                        name="dueDate"
+                        value={formData.dueDate}
+                        onChange={handleChange}
+                        className="w-full mt-1 p-2 bg-gray-700 rounded-md text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        required
+                    />
+                </div>
+                <div className="flex justify-end space-x-4">
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button type="submit" className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg">Save</button>
+                </div>
+            </form>
+        </div>
+    );
+}
+
+function OrderCard({ order, jobs, onEdit, onDelete }) {
+    const associatedJobs = jobs.filter(job => job.orderId === order.id);
+
+    return (
+        <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-purple-600">
+            <div className="flex justify-between items-start">
+                <div>
+                    <h3 className="text-lg font-bold text-cyan-400">{order.orderName}</h3>
+                    <p className="text-sm text-gray-400">Client: {order.clientName}</p>
+                    <p className="text-sm text-gray-400">Due: {toDDMMYYYY(order.dueDate?.toDate())}</p>
+                    <p className="text-sm text-gray-400">Jobs: {associatedJobs.length}</p>
+                </div>
+                <div className="flex items-center space-x-3">
+                    <button onClick={() => onEdit(order)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                    <button onClick={() => onDelete(order)} className="text-red-400 hover:text-red-300"><TrashIcon /></button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 // --- GLOBAL FILM HISTORY ---
 function FilmHistory({ db, userId, jobs }) {
@@ -822,36 +1164,37 @@ function FilmHistory({ db, userId, jobs }) {
     const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
 
     useEffect(() => {
-        if (!db || !userId) {
-            setIsLoading(false);
-            return;
-        }
+        if (!db || !userId) return;
 
-        const historyCollectionRef = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
-        const unsubscribe = onSnapshot(historyCollectionRef, (snapshot) => {
-            setIsLoading(true);
-            const combinedHistory = snapshot.docs.map(doc => ({
+        setIsLoading(true);
+        const q = query(collectionGroup(db, 'consumedRolls'), where('userId', '==', userId), orderBy('consumedAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const historyData = snapshot.docs.map(doc => ({
                 id: doc.id,
-                jobId: doc.ref.parent.parent.id, 
-                ...doc.data()
+                ...doc.data(),
+                jobId: doc.ref.parent.parent.id,
+                userId: userId
             }));
-
-            combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
-            setHistory(combinedHistory);
+            console.log("Fetched history data:", historyData);
+            const enrichedHistory = historyData.map(item => ({
+                ...item,
+                jobName: jobs.find(job => job.id === item.jobId)?.jobName || 'N/A'
+            }));
+            setHistory(enrichedHistory);
             setIsLoading(false);
         }, (error) => {
-            console.error("Error fetching global film history:", error);
+            console.error("Error fetching history:", error);
             setIsLoading(false);
         });
-
         return () => unsubscribe();
-    }, [db, userId]);
+    }, [db, userId, jobs]);
 
     const handleUpdateHistory = async (historyId, newDate) => {
         if (!editingHistoryEntry) return;
         const { jobId } = editingHistoryEntry;
         const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
         try {
+            console.log("Updating history with new date:", newDate);
             await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
             setEditingHistoryEntry(null);
         } catch (error) {
@@ -864,6 +1207,7 @@ function FilmHistory({ db, userId, jobs }) {
         const { jobId } = editingHistoryEntry;
         const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
         try {
+            console.log("Deleting history entry with id:", historyId);
             await deleteDoc(historyRef);
             setEditingHistoryEntry(null);
         } catch (error) {
@@ -871,46 +1215,46 @@ function FilmHistory({ db, userId, jobs }) {
         }
     };
 
+    const filteredHistory = history.filter(item =>
+        item.filmType.toLowerCase().includes(historySearch.toLowerCase()) ||
+        item.jobName.toLowerCase().includes(historySearch.toLowerCase()) ||
+        item.supplier.toLowerCase().includes(historySearch.toLowerCase())
+    );
 
-    const filteredHistory = history.filter(item => {
-        const searchTerm = historySearch.toLowerCase();
-        const filmMatch = item.filmType?.toLowerCase().includes(searchTerm);
-        const jobMatch = item.jobName?.toLowerCase().includes(searchTerm);
-        return filmMatch || jobMatch;
-    });
-
-    return(
+    return (
         <section>
-            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
-                <div className="relative w-full md:w-full">
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-cyan-400">Film Usage History</h2>
+                <div className="relative">
                     <input
                         type="text"
+                        placeholder="Search by film or job name..."
                         value={historySearch}
                         onChange={(e) => setHistorySearch(e.target.value)}
-                        placeholder="Search by film or job name..."
-                        className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        className="pl-10 pr-4 py-2 bg-gray-700 rounded-lg text-white focus:ring-2 focus:ring-cyan-500 focus:outline-none"
                     />
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3"><SearchIcon /></div>
                 </div>
             </div>
-
             {isLoading ? <p>Loading history...</p> : (
                 <div className="space-y-3">
                     {filteredHistory.length > 0 ? filteredHistory.map(item => (
                         <div key={item.id} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center">
                             <div>
                                 <p className="font-bold text-lg text-cyan-400">{item.filmType}</p>
-                                <p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p>
-                                <p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt)}</p>
-                                <p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p>
+                                <p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName}</span></p>
+                                <p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt.toDate())}</p>
+                                <p className="text-gray-400 text-sm">Supplier: {item.supplier} | Consumed Weight: {item.netWeight.toFixed(2)}kg</p>
                             </div>
-                            <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button>
+                            <div className="flex space-x-3">
+                                <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                                <button onClick={() => { if (window.confirm("Are you sure you want to delete this history entry?")) handleDeleteHistory(item.id); }} className="text-red-400 hover:text-red-300"><TrashIcon /></button>
+                            </div>
                         </div>
                     )) : <p className="text-center text-gray-500 py-8">No usage history found for your search.</p>}
                 </div>
             )}
-            <EditHistoryModal 
+            <EditHistoryModal
                 isOpen={!!editingHistoryEntry}
                 onClose={() => setEditingHistoryEntry(null)}
                 onSave={handleUpdateHistory}
