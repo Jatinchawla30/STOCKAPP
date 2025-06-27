@@ -17,24 +17,22 @@ const firebaseConfig = {
 const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 
 // --- Helper functions to format dates correctly ---
-const toYYYYMMDD = (date) => {
+function toYYYYMMDD(date) {
   if (!date) return '';
   const d = new Date(date);
-  d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
   const year = d.getFullYear();
   const month = (`0${d.getMonth() + 1}`).slice(-2);
   const day = (`0${d.getDate()}`).slice(-2);
   return `${year}-${month}-${day}`;
-};
-const toDDMMYYYY = (date) => {
-  if (!date) return 'N/A';
+}
+function toDDMMYYYY(date) {
+  if (!date) return '';
   const d = new Date(date);
-  d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
   const day = (`0${d.getDate()}`).slice(-2);
   const month = (`0${d.getMonth() + 1}`).slice(-2);
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
-};
+}
 
 // --- Main App Component ---
 function App() {
@@ -204,9 +202,11 @@ function FilmList({ films, onEdit, onDelete }) {
             <td>{film.supplier}</td>
             <td>
               {film.purchaseDate
-                ? toDDMMYYYY(film.purchaseDate?.toDate
-                  ? film.purchaseDate.toDate()
-                  : film.purchaseDate)
+                ? toDDMMYYYY(
+                    film.purchaseDate?.toDate
+                      ? film.purchaseDate.toDate()
+                      : film.purchaseDate
+                  )
                 : ''}
             </td>
             <td>
@@ -303,7 +303,11 @@ function FilmHistory({ db, userId, jobs }) {
                     onChange={e => setEditDate(e.target.value)}
                   />
                 ) : (
-                  toDDMMYYYY(item.consumedAt?.toDate ? item.consumedAt.toDate() : item.consumedAt)
+                  toDDMMYYYY(
+                    item.consumedAt?.toDate
+                      ? item.consumedAt.toDate()
+                      : item.consumedAt
+                  )
                 )}
               </td>
               <td>{item.supplier}</td>
