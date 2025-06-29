@@ -28,6 +28,10 @@ const toDDMMYYYY = (date) => {
     if (!date) return 'N/A';
     try {
         const d = date.toDate ? date.toDate() : new Date(date);
+        // Adjust for timezone offset when creating date from string in some contexts
+        if (typeof date === 'string') {
+           d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
+        }
         const day = (`0${d.getDate()}`).slice(-2);
         const month = (`0${d.getMonth() + 1}`).slice(-2);
         const year = d.getFullYear();
@@ -42,7 +46,7 @@ const toDDMMYYYY = (date) => {
 const PlusIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>);
 const EditIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" /></svg>);
 const TrashIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>);
-const PackageIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-14L4 7m0 0v10l8 4m0-14L4 7m16 0L4 7" /></svg>);
+const PackageIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-14L4 7m0 0v10l8 4m0-14L4 7m16 0L4 7" /></svg>);
 const ChevronLeftIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" /></svg>);
 const SearchIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>);
 const HistoryIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clipRule="evenodd" /></svg>);
@@ -870,216 +874,6 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
     );
 }
 
-function OrderManagement({ films, jobs, orders, db, userId }) {
-    const [showForm, setShowForm] = useState(false);
-    const [viewType, setViewType] = useState('active');
-    const [completedSearch, setCompletedSearch] = useState('');
-    const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
-    const [orderToComplete, setOrderToComplete] = useState(null);
-    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-    const [orderToDelete, setOrderToDelete] = useState(null);
-
-    const handleOrderSubmit = async (orderData) => {
-        if (!db || !userId) return;
-        try {
-            await addDoc(collection(db, `artifacts/${appId}/users/${userId}/orders`), { 
-                ...orderData, 
-                status: 'active',
-                createdAt: new Date(),
-                ownerId: userId 
-            });
-            setShowForm(false);
-        } catch (error) { console.error("Error creating order:", error); }
-    };
-
-    const handleOpenCompleteModal = (order) => {
-        setOrderToComplete(order);
-        setIsCompleteModalOpen(true);
-    };
-    
-    const handleCloseCompleteModal = () => {
-        setOrderToComplete(null);
-        setIsCompleteModalOpen(false);
-    };
-
-    const markOrderComplete = async (orderId, completionDate) => {
-        if (!db || !userId || !orderId) return;
-        const orderRef = doc(db, `artifacts/${appId}/users/${userId}/orders`, orderId);
-        try {
-            await updateDoc(orderRef, { 
-                status: 'completed', 
-                completedAt: new Date(`${completionDate}T00:00:00`)
-            });
-        } catch(error) {
-            console.error("Error completing order: ", error);
-        } finally {
-            handleCloseCompleteModal();
-        }
-    };
-
-    const openDeleteModal = (order) => {
-        setOrderToDelete(order);
-        setIsDeleteModalOpen(true);
-    };
-    
-    const closeDeleteModal = () => {
-        setOrderToDelete(null);
-        setIsDeleteModalOpen(false);
-    };
-    
-    const executeDeleteOrder = async () => {
-        if (!orderToDelete) return;
-        try {
-             await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/orders`, orderToDelete.id));
-        } catch (error) {
-            console.error("Error deleting order: ", error);
-        } finally {
-            closeDeleteModal();
-        }
-    };
-    
-    const activeOrders = orders.filter(o => o.status === 'active');
-    const completedOrders = orders.filter(o => o.status === 'completed')
-        .filter(o => o.orderName.toLowerCase().includes(completedSearch.toLowerCase()));
-
-    return (
-        <section>
-            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-                <h2 className="text-2xl font-semibold text-gray-200">Customer Orders</h2>
-                <div className="flex-grow flex justify-center">
-                    <div className="bg-gray-700 p-1 rounded-lg flex space-x-1">
-                        <button onClick={() => setViewType('active')} className={`px-4 py-1 rounded-md text-sm font-semibold ${viewType === 'active' ? 'bg-cyan-600 text-white' : 'text-gray-300'}`}>Active</button>
-                        <button onClick={() => setViewType('completed')} className={`px-4 py-1 rounded-md text-sm font-semibold ${viewType === 'completed' ? 'bg-cyan-600 text-white' : 'text-gray-300'}`}>Completed</button>
-                    </div>
-                </div>
-                <button onClick={() => setShowForm(true)} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
-                    <PlusIcon /><span className="ml-2 hidden md:inline">Add New Order</span>
-                </button>
-            </div>
-            {showForm && <OrderForm jobs={jobs} onSubmit={handleOrderSubmit} onCancel={() => setShowForm(false)} />}
-            
-            <MarkCompleteModal 
-                isOpen={isCompleteModalOpen} 
-                onClose={handleCloseCompleteModal}
-                onConfirm={markOrderComplete}
-                order={orderToComplete}
-            />
-
-            <ConfirmationModal
-                isOpen={isDeleteModalOpen}
-                onClose={closeDeleteModal}
-                onConfirm={executeDeleteOrder}
-                title="Delete Order?"
-            >
-                <p>Are you sure you want to delete the order <strong className="text-white">{orderToDelete?.orderName}</strong>?</p>
-                <p className="mt-2">This action cannot be undone.</p>
-            </ConfirmationModal>
-
-            {viewType === 'active' ? (
-                <OrderList orders={activeOrders} jobs={jobs} films={films} onDelete={openDeleteModal} onComplete={handleOpenCompleteModal} db={db} userId={userId} />
-            ) : (
-                <div>
-                     <div className="relative mb-4">
-                        <input type="text" value={completedSearch} onChange={e => setCompletedSearch(e.target.value)} placeholder="Search completed orders..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"/>
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
-                    </div>
-                    <OrderList orders={completedOrders} jobs={jobs} films={films} onDelete={openDeleteModal} db={db} userId={userId} />
-                </div>
-            )}
-        </section>
-    );
-}
-
-function OrderForm({ jobs, onSubmit, onCancel }) {
-    const [orderName, setOrderName] = useState('');
-    const [weightMade, setWeightMade] = useState('');
-    const [metersMade, setMetersMade] = useState('');
-    const [selectedJob, setSelectedJob] = useState(null);
-    const [jobSearch, setJobSearch] = useState('');
-    const [showJobResults, setShowJobResults] = useState(false);
-    const jobSearchRef = useRef(null);
-    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
-
-
-    useEffect(() => {
-        function handleClickOutside(event) {
-            if (jobSearchRef.current && !jobSearchRef.current.contains(event.target)) {
-                setShowJobResults(false);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside);
-        };
-    }, [jobSearchRef]);
-
-
-    const filteredJobs = jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : [];
-
-    const handleJobSelect = (job) => {
-        setSelectedJob(job);
-        setJobSearch(job.jobName);
-        setShowJobResults(false);
-    };
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (!selectedJob) {
-            setMessageModal({isOpen: true, title: "Input Error", body: "Please select a job for this order."});
-            return;
-        }
-        onSubmit({
-            orderName,
-            weightMade: parseFloat(weightMade) || 0,
-            metersMade: parseFloat(metersMade) || 0,
-            jobId: selectedJob.id,
-            jobName: selectedJob.jobName,
-        });
-    };
-
-    return (
-        <div className="bg-gray-800 p-6 rounded-lg mb-8 shadow-lg">
-            <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>{messageModal.body}</MessageModal>
-            <h3 className="text-xl font-semibold mb-4 text-cyan-400">Add New Order</h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <input value={orderName} onChange={e => setOrderName(e.target.value)} placeholder="Order Name / Customer" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="number" value={weightMade} onChange={e => setWeightMade(e.target.value)} placeholder="Weight to be Made (kg)" className="w-full bg-gray-700 p-2 rounded-md" />
-                    <input type="number" value={metersMade} onChange={e => setMetersMade(e.target.value)} placeholder="Meters to be Made" className="w-full bg-gray-700 p-2 rounded-md" />
-                </div>
-                <div ref={jobSearchRef} className="relative">
-                    <label className="block text-sm font-medium text-gray-300 mb-1">Select Associated Job</label>
-                    <input
-                        type="text" value={jobSearch}
-                        onChange={e => { setJobSearch(e.target.value); setShowJobResults(true); }}
-                        onFocus={() => setShowJobResults(true)}
-                        placeholder="Type to search for a job..."
-                        className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                    <div className="absolute inset-y-0 left-0 pl-3 top-6 flex items-center pointer-events-none"><SearchIcon /></div>
-                    {showJobResults && jobSearch && (
-                        <div className="absolute z-10 mt-1 w-full max-h-40 overflow-y-auto bg-gray-700 rounded-md border border-gray-600">
-                            {filteredJobs.length > 0 ? filteredJobs.map(job => (
-                                <div key={job.id} onClick={() => handleJobSelect(job)} className="p-2 cursor-pointer hover:bg-cyan-600">
-                                    {job.jobName}
-                                </div>
-                            )) : <div className="p-2 text-gray-400">No jobs found.</div>}
-                        </div>
-                    )}
-                </div>
-                <div className="flex items-center space-x-4 pt-2">
-                    <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full">Create Order</button>
-                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
-                </div>
-            </form>
-        </div>
-    );
-}
-
-function OrderList({ orders, jobs, films, onDelete, onComplete, db, userId }) {
-    if (orders.length === 0) return <p className="text-center text-gray-500 py-8">No orders found.</p>;
-    return <div className="space-y-4">{orders.map(order => <OrderCard key={order.id} order={order} jobs={jobs} films={films} onDelete={onDelete} onComplete={onComplete} db={db} userId={userId}/>)}</div>;
-}
-
 function OrderCard({ order, jobs, films, onDelete, onComplete, db, userId }) {
     const job = useMemo(() => jobs.find(j => j.id === order.jobId), [jobs, order.jobId]);
     const [showHistory, setShowHistory] = useState(false);
@@ -1188,7 +982,6 @@ function OrderCard({ order, jobs, films, onDelete, onComplete, db, userId }) {
     );
 }
 
-// --- Use Stock Components ---
 function UseStock({ films, jobs, db, userId, setView }) {
     const [selectedJob, setSelectedJob] = useState(null);
     const [jobSearch, setJobSearch] = useState('');
@@ -1480,5 +1273,6 @@ function FilmHistory({ db, userId }) {
         </section>
     );
 }
+
 
 export default App;
