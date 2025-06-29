@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, orderBy, where } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // --- Firebase Configuration ---
@@ -855,7 +855,7 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
                                         <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
                                             <div>
                                                 <p className="font-semibold">{roll.filmType}</p>
-                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt.toDate())}</p>
+                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p>
                                             </div>
                                             <button onClick={() => setEditingHistoryEntry(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
                                         </li>
@@ -1381,5 +1381,6 @@ function UseStock({ films, jobs, db, userId, setView }) {
         </section>
     );
 }
+
 
 export default App;
