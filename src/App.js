@@ -17,10 +17,8 @@ const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
     if (!date) return '';
-    // This safely handles Firestore Timestamps, JS Dates, and date strings
     const d = date.toDate ? date.toDate() : new Date(date);
-    if (isNaN(d.getTime())) return ''; // Return empty string for invalid dates
-
+    if (isNaN(d.getTime())) return '';
     const year = d.getFullYear();
     const month = (`0${d.getMonth() + 1}`).slice(-2);
     const day = (`0${d.getDate()}`).slice(-2);
@@ -30,15 +28,16 @@ const toYYYYMMDD = (date) => {
 const toDDMMYYYY = (date) => {
     if (!date) return 'N/A';
     try {
-        // This safely handles both Firestore Timestamps (which have a .toDate() method)
-        // and date strings or JS Date objects.
         const d = date.toDate ? date.toDate() : new Date(date);
-        
-        // This check prevents "Invalid Date" from showing up
         if (isNaN(d.getTime())) {
-            return 'Invalid Date';
+             // Handle cases where date might be a string in a different format
+             const parsed = new Date(date);
+             if(isNaN(parsed.getTime())) return 'Invalid Date';
+             const day = (`0${parsed.getDate()}`).slice(-2);
+             const month = (`0${parsed.getMonth() + 1}`).slice(-2);
+             const year = parsed.getFullYear();
+             return `${day}/${month}/${year}`;
         }
-
         const day = (`0${d.getDate()}`).slice(-2);
         const month = (`0${d.getMonth() + 1}`).slice(-2);
         const year = d.getFullYear();
@@ -212,7 +211,7 @@ function App() {
                     {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
                     {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
                     {view === 'use_stock' && <UseStock films={films} jobs={jobs} db={db} userId={user.uid} setView={setView} />}
-                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} />}
+                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} />}
                 </main>
             </div>
         </div>
@@ -859,7 +858,7 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
                                         <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
                                             <div>
                                                 <p className="font-semibold">{roll.filmType}</p>
-                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p>
+                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt.toDate())}</p>
                                             </div>
                                             <button onClick={() => setEditingHistoryEntry(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
                                         </li>
@@ -1401,7 +1400,6 @@ function FilmHistory({ db, userId }) {
 
         const historyCollectionRef = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
         const unsubscribe = onSnapshot(historyCollectionRef, (snapshot) => {
-            setIsLoading(true);
             const combinedHistory = snapshot.docs.map(doc => ({
                 id: doc.id,
                 jobId: doc.ref.parent.parent.id, 
@@ -1479,7 +1477,7 @@ function FilmHistory({ db, userId }) {
                             </div>
                             <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button>
                         </div>
-                    )) : <p className="text-center text-gray-500 py-8">No usage history found for your search.</p>}
+                    )) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}
                 </div>
             )}
             <EditHistoryModal 
