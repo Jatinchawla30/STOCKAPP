@@ -210,6 +210,7 @@ function App() {
                     {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
                     {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
                     {view === 'use_stock' && <UseStock films={films} jobs={jobs} db={db} userId={user.uid} setView={setView} />}
+                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} />}
                 </main>
             </div>
         </div>
@@ -296,6 +297,7 @@ const Nav = ({ view, setView }) => (
         <NavButton text="Job Management" isActive={view === 'jobs'} onClick={() => setView('jobs')} />
         <NavButton text="Orders" isActive={view === 'orders'} onClick={() => setView('orders')} />
         <NavButton text="Use Stock" isActive={view === 'use_stock'} onClick={() => setView('use_stock')} />
+        <NavButton text="Film History" isActive={view === 'film_history'} onClick={() => setView('film_history')} />
     </nav>
 );
 
@@ -1382,5 +1384,123 @@ function UseStock({ films, jobs, db, userId, setView }) {
     );
 }
 
+// --- GLOBAL FILM HISTORY ---
+function FilmHistory({ db, userId }) {
+    const [history, setHistory] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [historySearch, setHistorySearch] = useState('');
+    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
+
+    useEffect(() => {
+        if (!db || !userId) {
+            setIsLoading(false);
+            return;
+        }
+
+        const jobsRef = collection(db, `artifacts/${appId}/users/${userId}/jobs`);
+        const unsubscribe = onSnapshot(jobsRef, async (jobsSnapshot) => {
+            setIsLoading(true);
+            const historyPromises = jobsSnapshot.docs.map(jobDoc => {
+                const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${jobDoc.id}/consumedRolls`;
+                return getDocs(query(collection(db, historyCollectionPath)));
+            });
+
+            const allHistorySnapshots = await Promise.all(historyPromises);
+
+            const combinedHistory = [];
+            allHistorySnapshots.forEach(snapshot => {
+                snapshot.docs.forEach(doc => {
+                    combinedHistory.push({ 
+                        id: doc.id,
+                        jobId: doc.ref.parent.parent.id, 
+                        ...doc.data()
+                    });
+                });
+            });
+
+            combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
+            setHistory(combinedHistory);
+            setIsLoading(false);
+        }, (error) => {
+            console.error("Error fetching jobs for history:", error);
+            setIsLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [db, userId]);
+
+    const handleUpdateHistory = async (historyId, newDate) => {
+        if (!editingHistoryEntry) return;
+        const { jobId } = editingHistoryEntry;
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
+        try {
+            await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+            setEditingHistoryEntry(null);
+        } catch (error) {
+            console.error("Error updating history entry:", error);
+        }
+    };
+
+    const handleDeleteHistory = async (historyId) => {
+        if (!editingHistoryEntry) return;
+        const { jobId } = editingHistoryEntry;
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
+        try {
+            await deleteDoc(historyRef);
+            setEditingHistoryEntry(null);
+        } catch (error) {
+            console.error("Error deleting history entry:", error);
+        }
+    };
+
+
+    const filteredHistory = history.filter(item => {
+        const searchTerm = historySearch.toLowerCase();
+        const filmMatch = item.filmType?.toLowerCase().includes(searchTerm);
+        const jobMatch = item.jobName?.toLowerCase().includes(searchTerm);
+        return filmMatch || jobMatch;
+    });
+
+    return(
+        <section>
+            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
+                <div className="relative w-full md:w-full">
+                    <input
+                        type="text"
+                        value={historySearch}
+                        onChange={(e) => setHistorySearch(e.target.value)}
+                        placeholder="Search by film or job name..."
+                        className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                    />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
+                </div>
+            </div>
+
+            {isLoading ? <p>Loading history...</p> : (
+                <div className="space-y-3">
+                    {filteredHistory.length > 0 ? filteredHistory.map(item => (
+                        <div key={item.id} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center">
+                            <div>
+                                <p className="font-bold text-lg text-cyan-400">{item.filmType}</p>
+                                <p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p>
+                                <p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt)}</p>
+                                <p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p>
+                            </div>
+                            <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button>
+                        </div>
+                    )) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}
+                </div>
+            )}
+            <EditHistoryModal 
+                isOpen={!!editingHistoryEntry}
+                onClose={() => setEditingHistoryEntry(null)}
+                onSave={handleUpdateHistory}
+                onDelete={handleDeleteHistory}
+                historyEntry={editingHistoryEntry}
+            />
+        </section>
+    );
+}
 
 export default App;
