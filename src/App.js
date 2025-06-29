@@ -17,7 +17,10 @@ const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
     if (!date) return '';
+    // This safely handles Firestore Timestamps, JS Dates, and date strings
     const d = date.toDate ? date.toDate() : new Date(date);
+    if (isNaN(d.getTime())) return ''; // Return empty string for invalid dates
+
     const year = d.getFullYear();
     const month = (`0${d.getMonth() + 1}`).slice(-2);
     const day = (`0${d.getDate()}`).slice(-2);
@@ -27,7 +30,7 @@ const toYYYYMMDD = (date) => {
 const toDDMMYYYY = (date) => {
     if (!date) return 'N/A';
     try {
-        // This handles both Firestore Timestamps (which have a .toDate() method)
+        // This safely handles both Firestore Timestamps (which have a .toDate() method)
         // and date strings or JS Date objects.
         const d = date.toDate ? date.toDate() : new Date(date);
         
@@ -499,7 +502,7 @@ function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
 
     useEffect(() => {
         if (historyEntry) {
-            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt?.toDate()));
+            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
         }
     }, [historyEntry]);
 
@@ -856,7 +859,7 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
                                         <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
                                             <div>
                                                 <p className="font-semibold">{roll.filmType}</p>
-                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt.toDate())}</p>
+                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p>
                                             </div>
                                             <button onClick={() => setEditingHistoryEntry(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
                                         </li>
@@ -916,7 +919,7 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
         try {
             await updateDoc(orderRef, { 
                 status: 'completed', 
-                completedAt: new Date(`${completionDate}T00:00:00`)
+                completedAt: completionDate
             });
         } catch(error) {
             console.error("Error completing order: ", error);
@@ -1471,7 +1474,7 @@ function FilmHistory({ db, userId }) {
                             <div>
                                 <p className="font-bold text-lg text-cyan-400">{item.filmType}</p>
                                 <p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p>
-                                <p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt.toDate())}</p>
+                                <p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt)}</p>
                                 <p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p>
                             </div>
                             <button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button>
