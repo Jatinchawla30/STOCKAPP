@@ -17,7 +17,7 @@ const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
     if (!date) return '';
-    const d = new Date(date);
+    const d = date.toDate ? date.toDate() : new Date(date);
     const year = d.getFullYear();
     const month = (`0${d.getMonth() + 1}`).slice(-2);
     const day = (`0${d.getDate()}`).slice(-2);
@@ -27,10 +27,15 @@ const toYYYYMMDD = (date) => {
 const toDDMMYYYY = (date) => {
     if (!date) return 'N/A';
     try {
+        // This handles both Firestore Timestamps (which have a .toDate() method)
+        // and date strings or JS Date objects.
         const d = date.toDate ? date.toDate() : new Date(date);
-        if (typeof date === 'string') {
-           d.setMinutes(d.getMinutes() + d.getTimezoneOffset());
+        
+        // This check prevents "Invalid Date" from showing up
+        if (isNaN(d.getTime())) {
+            return 'Invalid Date';
         }
+
         const day = (`0${d.getDate()}`).slice(-2);
         const month = (`0${d.getMonth() + 1}`).slice(-2);
         const year = d.getFullYear();
@@ -475,7 +480,7 @@ function FilmList({ films, onEdit, onDelete }) {
                         <tr key={film.id} className="border-b border-gray-700 hover:bg-gray-700/50">
                             <td className="p-3 font-medium">{film.filmType}</td><td className="p-3">{film.currentWeight?.toFixed(2)}</td>
                             <td className="p-3">{film.supplier}</td>
-                            <td className="p-3">{toDDMMYYYY(film.purchaseDate?.toDate())}</td>
+                            <td className="p-3">{toDDMMYYYY(film.purchaseDate)}</td>
                             <td className="p-3 flex space-x-2">
                                 <button onClick={() => onEdit(film)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
                                 <button onClick={() => onDelete(film)} className="text-red-500 hover:text-red-400"><TrashIcon /></button>
