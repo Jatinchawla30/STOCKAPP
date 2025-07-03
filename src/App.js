@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setDoc } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signOut, signInWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signOut } from 'firebase/auth';
 
 // --- Firebase Configuration ---
 // In a real-world app, use environment variables. For this example, we'll use the globals provided.
@@ -116,10 +116,8 @@ function App() {
     }, []);
 
     useEffect(() => {
-        if (!isAuthReady || !db || !user) {
-            if (isAuthReady) { 
-                setIsLoading(false);
-            }
+        if (!user) {
+            setIsLoading(false); // If there's no user, stop loading.
             setFilms([]);
             setJobs([]);
             setOrders([]);
@@ -165,11 +163,11 @@ function App() {
         return () => {
             allUnsubscribes.forEach(unsub => unsub());
         };
-    }, [isAuthReady, db, user]);
+    }, [db, user]);
 
     const handleLogout = () => {
         if(auth) {
-            signOut(auth);
+            signOut(auth).catch(console.error);
         }
     };
     
