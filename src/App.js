@@ -1,18 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setDoc } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // --- Firebase Configuration ---
-const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
-};
-const appId = process.env.REACT_APP_FIREBASE_APP_ID;
+// In a real-world app, use environment variables. For this example, we'll use the globals provided.
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
 
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
@@ -118,26 +113,35 @@ function App() {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        const app = initializeApp(firebaseConfig);
-        const firestore = getFirestore(app);
-        const authInstance = getAuth(app);
-        setDb(firestore);
-        setAuth(authInstance);
+        try {
+            const app = initializeApp(firebaseConfig);
+            const firestore = getFirestore(app);
+            const authInstance = getAuth(app);
+            setDb(firestore);
+            setAuth(authInstance);
 
-        const unsubscribe = onAuthStateChanged(authInstance, (user) => {
-            setUser(user);
+            const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+                setUser(user);
+                setIsAuthReady(true);
+            });
+
+            return () => unsubscribe();
+        } catch (e) {
+            console.error("Firebase initialization failed:", e);
             setIsAuthReady(true);
-        });
-
-        return () => unsubscribe();
+            setIsLoading(false);
+        }
     }, []);
 
     useEffect(() => {
         if (!isAuthReady || !db || !user) {
-          if (isAuthReady) { 
-            setIsLoading(false);
-          }
-          return;
+            if (isAuthReady) { 
+                setIsLoading(false);
+            }
+            setFilms([]);
+            setJobs([]);
+            setOrders([]);
+            return;
         }
 
         setIsLoading(true);
@@ -160,14 +164,24 @@ function App() {
             setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => console.error("Error fetching orders:", error));
 
-        Promise.all([
-            getDocs(qFilms), getDocs(qJobs), getDocs(qOrders)
-        ]).catch(console.error).finally(() => setIsLoading(false));
+        const allUnsubscribes = [unsubscribeFilms, unsubscribeJobs, unsubscribeOrders];
+        
+        const fetchData = async () => {
+            try {
+                await Promise.all([
+                    getDocs(qFilms), getDocs(qJobs), getDocs(qOrders)
+                ]);
+            } catch (error) {
+                console.error("Error during initial data fetch:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchData();
 
         return () => {
-             unsubscribeFilms();
-             unsubscribeJobs();
-             unsubscribeOrders();
+            allUnsubscribes.forEach(unsub => unsub());
         };
     }, [isAuthReady, db, user]);
 
@@ -202,9 +216,9 @@ function App() {
             <div className="container mx-auto p-4 md:p-8">
                 <Header user={user} />
                 <Nav view={view} setView={setView} />
-                 <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-                     Logout
-                 </button>
+                <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                    Logout
+                </button>
                 <main className="mt-8">
                     {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} />}
                     {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
@@ -218,7 +232,7 @@ function App() {
 }
 
 // --- MODAL AND HEADER COMPONENTS ---
-const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children }) => {
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children, confirmText = "Confirm", confirmColor = "bg-red-600 hover:bg-red-700" }) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
@@ -230,7 +244,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children }) => {
                 <div className="text-gray-300 mb-6">{children}</div>
                 <div className="flex justify-center gap-4">
                     <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">Cancel</button>
-                    <button onClick={onConfirm} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">Confirm Delete</button>
+                    <button onClick={onConfirm} className={`${confirmColor} text-white font-bold py-2 px-6 rounded-lg transition-colors`}>{confirmText}</button>
                 </div>
             </div>
         </div>
@@ -268,7 +282,7 @@ const MarkCompleteModal = ({ isOpen, onClose, onConfirm, order }) => {
 const MessageModal = ({ isOpen, onClose, title, children }) => {
     if (!isOpen) return null;
     return (
-         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+       <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 text-center">
                 <h3 className="text-2xl font-bold text-cyan-400 mb-4">{title}</h3>
                 <div className="text-gray-300 mb-6">{children}</div>
@@ -283,9 +297,9 @@ const Header = ({ user }) => (
         <h2 className="text-2xl font-semibold text-gray-300">SHRI GURUNANAK INDUSTRIES</h2>
         <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
         {user && (
-          <div className="mt-2 text-xs text-yellow-300">
-            <p>Logged in as: {user.email}</p>
-          </div>
+            <div className="mt-2 text-xs text-yellow-300">
+                <p>Logged in as: {user.email}</p>
+            </div>
         )}
         <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
     </header>
@@ -380,6 +394,7 @@ function FilmInventory({ films, db, userId }) {
                 onClose={closeDeleteModal}
                 onConfirm={executeDelete}
                 title="Delete Film Roll?"
+                confirmText="Confirm Delete"
             >
               <p>Are you sure you want to delete this <strong className="text-white">{filmToDelete?.filmType}</strong> roll?</p>
               <p className="mt-2">This action cannot be undone.</p>
@@ -507,9 +522,7 @@ function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
     if (!isOpen) return null;
 
     const handleDelete = () => {
-        if (window.confirm("Are you sure you want to delete this history entry? This cannot be undone.")) {
-            onDelete(historyEntry.id);
-        }
+        onDelete(historyEntry.id);
     }
 
     return (
@@ -633,6 +646,7 @@ function JobManagement({ films, jobs, orders, db, userId }) {
                 onClose={closeDeleteModal}
                 onConfirm={executeDeleteJob}
                 title="Delete Job?"
+                confirmText="Confirm Delete"
             >
                 <p>Are you sure you want to delete the job <strong className="text-white">{jobToDelete?.jobName}</strong>?</p>
                 <p className="mt-2">This will also delete its entire consumption history. This action cannot be undone.</p>
@@ -737,7 +751,7 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
                                 </div>
                                 <button type="button" onClick={() => removeMaterial(index)} className="text-red-500 hover:text-red-400 p-2 rounded-full bg-gray-700"><TrashIcon /></button>
                             </div>
-                         );
+                           );
                     })}
                     <button type="button" onClick={addMaterial} className="mt-2 text-cyan-400 hover:text-cyan-300 text-sm">+ Add Material</button>
                 </div>
@@ -979,6 +993,7 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
                 onClose={closeDeleteModal}
                 onConfirm={executeDeleteOrder}
                 title="Delete Order?"
+                confirmText="Confirm Delete"
             >
                 <p>Are you sure you want to delete the order <strong className="text-white">{orderToDelete?.orderName}</strong>?</p>
                 <p className="mt-2">This action cannot be undone.</p>
@@ -1385,11 +1400,112 @@ function UseStock({ films, jobs, db, userId, setView }) {
 }
 
 // --- GLOBAL FILM HISTORY ---
-function FilmHistory({ db, userId }) {
+
+/**
+ * NEW, more powerful modal for editing history entries from the global history page.
+ */
+function FilmHistoryEditModal({ isOpen, onClose, onUpdate, onDelete, historyEntry, jobs }) {
+    const [consumedAt, setConsumedAt] = useState('');
+    const [jobId, setJobId] = useState('');
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+    useEffect(() => {
+        if (historyEntry) {
+            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
+            setJobId(historyEntry.jobId || '');
+        }
+    }, [historyEntry]);
+
+    if (!isOpen) return null;
+
+    const handleUpdate = () => {
+        onUpdate(historyEntry, { newDate: consumedAt, newJobId: jobId });
+    };
+
+    const handleDelete = () => {
+        onDelete(historyEntry);
+    };
+
+    return (
+        <>
+            <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+                <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg m-4">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
+                        <button onClick={onClose} className="text-gray-400 hover:text-white"><XIcon /></button>
+                    </div>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400">Film Type</label>
+                            <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.filmType}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400">Original Weight</label>
+                                <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.netWeight.toFixed(2)} kg</p>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-400">Supplier</label>
+                                <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.supplier}</p>
+                            </div>
+                        </div>
+                        <div>
+                            <label htmlFor="date-input" className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
+                            <input
+                                id="date-input"
+                                type="date"
+                                value={consumedAt}
+                                onChange={(e) => setConsumedAt(e.target.value)}
+                                className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="job-select" className="block text-sm font-medium text-gray-300 mb-1">Assign to Job</label>
+                            <select
+                                id="job-select"
+                                value={jobId}
+                                onChange={(e) => setJobId(e.target.value)}
+                                className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                            >
+                                <option value="">-- Select a Job --</option>
+                                {jobs.map(job => (
+                                    <option key={job.id} value={job.id}>{job.jobName}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    <div className="flex justify-between mt-6 gap-4">
+                        <button onClick={() => setShowDeleteConfirm(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete & Restore</button>
+                        <div>
+                            <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg mr-2">Cancel</button>
+                            <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update Entry</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <ConfirmationModal
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={handleDelete}
+                title="Restore Roll to Stock?"
+                confirmText="Yes, Restore It"
+                confirmColor="bg-yellow-500 hover:bg-yellow-600"
+            >
+                <p>Are you sure you want to delete this history record?</p>
+                <p className="mt-4 font-semibold text-yellow-300">The original film roll will be added back to your main stock inventory.</p>
+                <p className="mt-2 text-sm">This action is for correcting mistakes.</p>
+            </ConfirmationModal>
+        </>
+    );
+}
+
+
+function FilmHistory({ db, userId, jobs }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [historySearch, setHistorySearch] = useState('');
     const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
+    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
 
     useEffect(() => {
         if (!db || !userId) {
@@ -1429,30 +1545,87 @@ function FilmHistory({ db, userId }) {
         return () => unsubscribe();
     }, [db, userId]);
 
-    const handleUpdateHistory = async (historyId, newDate) => {
-        if (!editingHistoryEntry) return;
-        const { jobId } = editingHistoryEntry;
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
-        try {
-            await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+    const handleUpdateHistory = async (historyEntry, { newDate, newJobId }) => {
+        if (!historyEntry || !newJobId) {
+             setMessageModal({isOpen: true, title: "Update Error", body: "Cannot update entry without a valid job."});
+             return;
+        }
+
+        const oldJobId = historyEntry.jobId;
+        const isJobChanged = oldJobId !== newJobId;
+        const newConsumedAt = new Date(newDate + 'T00:00:00Z');
+
+        if (!isJobChanged && newConsumedAt.getTime() === historyEntry.consumedAt.toDate().getTime()) {
             setEditingHistoryEntry(null);
+            return;
+        }
+
+        const batch = writeBatch(db);
+        const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${oldJobId}/consumedRolls`, historyEntry.id);
+
+        if (isJobChanged) {
+            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJobId}/consumedRolls`));
+            const newJob = jobs.find(j => j.id === newJobId);
+            
+            const updatedData = {
+                ...historyEntry,
+                consumedAt: newConsumedAt,
+                jobId: newJobId,
+                jobName: newJob ? newJob.jobName : 'Unknown Job'
+            };
+            delete updatedData.id; 
+
+            batch.set(newHistoryRef, updatedData);
+            batch.delete(oldHistoryRef);
+        } else {
+            batch.update(oldHistoryRef, { consumedAt: newConsumedAt });
+        }
+
+        try {
+            await batch.commit();
+            setMessageModal({isOpen: true, title: "Success", body: "History entry has been updated."});
         } catch (error) {
             console.error("Error updating history entry:", error);
-        }
-    };
-
-    const handleDeleteHistory = async (historyId) => {
-        if (!editingHistoryEntry) return;
-        const { jobId } = editingHistoryEntry;
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
-        try {
-            await deleteDoc(historyRef);
+            setMessageModal({isOpen: true, title: "Error", body: "Failed to update history entry."});
+        } finally {
             setEditingHistoryEntry(null);
-        } catch (error) {
-            console.error("Error deleting history entry:", error);
         }
     };
 
+    const handleDeleteAndRestore = async (historyEntry) => {
+        if (!historyEntry || !historyEntry.originalId) {
+            setMessageModal({isOpen: true, title: "Restore Error", body: "Cannot restore roll: original ID is missing."});
+            return;
+        }
+        
+        const batch = writeBatch(db);
+
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+        
+        const filmRefToRestore = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
+
+        const restoredFilmData = {
+            filmType: historyEntry.filmType,
+            netWeight: historyEntry.netWeight,
+            currentWeight: historyEntry.netWeight, 
+            supplier: historyEntry.supplier,
+            purchaseDate: historyEntry.purchaseDate,
+            createdAt: historyEntry.createdAt,
+        };
+
+        batch.set(filmRefToRestore, restoredFilmData);
+        batch.delete(historyRef);
+
+        try {
+            await batch.commit();
+            setMessageModal({isOpen: true, title: "Success", body: "Roll has been restored to the main stock inventory."});
+        } catch (error) {
+            console.error("Error deleting and restoring roll:", error);
+            setMessageModal({isOpen: true, title: "Error", body: "An error occurred during the restore process."});
+        } finally {
+            setEditingHistoryEntry(null);
+        }
+    };
 
     const filteredHistory = history.filter(item => {
         const searchTerm = historySearch.toLowerCase();
@@ -1463,9 +1636,12 @@ function FilmHistory({ db, userId }) {
 
     return(
         <section>
+            <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>
+                {messageModal.body}
+            </MessageModal>
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
                 <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
-                <div className="relative w-full md:w-full">
+                <div className="relative w-full md:w-1/2">
                     <input
                         type="text"
                         value={historySearch}
@@ -1492,12 +1668,13 @@ function FilmHistory({ db, userId }) {
                     )) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}
                 </div>
             )}
-            <EditHistoryModal 
+            <FilmHistoryEditModal 
                 isOpen={!!editingHistoryEntry}
                 onClose={() => setEditingHistoryEntry(null)}
-                onSave={handleUpdateHistory}
-                onDelete={handleDeleteHistory}
+                onUpdate={handleUpdateHistory}
+                onDelete={handleDeleteAndRestore}
                 historyEntry={editingHistoryEntry}
+                jobs={jobs}
             />
         </section>
     );
