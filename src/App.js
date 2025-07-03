@@ -518,6 +518,7 @@ function JobManagement({ films, jobs, orders, db, userId }) {
     const [jobToDelete, setJobToDelete] = useState(null);
     const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
     const [messageModalContent, setMessageModalContent] = useState({title: '', body: ''});
+    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
 
     const handleJobSubmit = async (jobData) => {
         if (!db || !userId) return;
@@ -579,6 +580,92 @@ function JobManagement({ films, jobs, orders, db, userId }) {
         }
     };
     
+    const handleUpdateHistory = async (historyEntry, { newDate, newJobId }) => {
+        if (!historyEntry || !newJobId) {
+             setMessageModalContent({title: "Update Error", body: "Cannot update entry without a valid job."});
+             setIsMessageModalOpen(true);
+             return;
+        }
+
+        const oldJobId = historyEntry.jobId;
+        const isJobChanged = oldJobId !== newJobId;
+        const newConsumedAt = new Date(newDate + 'T00:00:00Z');
+
+        if (!isJobChanged && newConsumedAt.getTime() === historyEntry.consumedAt.toDate().getTime()) {
+            setEditingHistoryEntry(null);
+            return;
+        }
+
+        const batch = writeBatch(db);
+        const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${oldJobId}/consumedRolls`, historyEntry.id);
+
+        if (isJobChanged) {
+            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJobId}/consumedRolls`));
+            const newJob = jobs.find(j => j.id === newJobId);
+            
+            const updatedData = {
+                ...historyEntry,
+                consumedAt: newConsumedAt,
+                jobId: newJobId,
+                jobName: newJob ? newJob.jobName : 'Unknown Job'
+            };
+            delete updatedData.id; 
+
+            batch.set(newHistoryRef, updatedData);
+            batch.delete(oldHistoryRef);
+        } else {
+            batch.update(oldHistoryRef, { consumedAt: newConsumedAt });
+        }
+
+        try {
+            await batch.commit();
+            setMessageModalContent({title: "Success", body: "History entry has been updated."});
+            setIsMessageModalOpen(true);
+        } catch (error) {
+            console.error("Error updating history entry:", error);
+            setMessageModalContent({title: "Error", body: "Failed to update history entry."});
+            setIsMessageModalOpen(true);
+        } finally {
+            setEditingHistoryEntry(null);
+        }
+    };
+
+    const handleDeleteAndRestore = async (historyEntry) => {
+         if (!historyEntry || !historyEntry.originalId) {
+            setMessageModalContent({title: "Restore Error", body: "Cannot restore roll: original ID is missing."});
+            setIsMessageModalOpen(true);
+            return;
+        }
+        
+        const batch = writeBatch(db);
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+        const filmRefToRestore = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
+
+        const restoredFilmData = {
+            filmType: historyEntry.filmType,
+            netWeight: historyEntry.netWeight,
+            currentWeight: historyEntry.netWeight, 
+            supplier: historyEntry.supplier,
+            purchaseDate: historyEntry.purchaseDate,
+            createdAt: historyEntry.createdAt,
+        };
+
+        batch.set(filmRefToRestore, restoredFilmData);
+        batch.delete(historyRef);
+
+        try {
+            await batch.commit();
+            setMessageModalContent({title: "Success", body: "Roll has been restored to the main stock inventory."});
+            setIsMessageModalOpen(true);
+        } catch (error) {
+            console.error("Error deleting and restoring roll:", error);
+            setMessageModalContent({title: "Error", body: "An error occurred during the restore process."});
+            setIsMessageModalOpen(true);
+        } finally {
+            setEditingHistoryEntry(null);
+        }
+    };
+
     const filteredJobs = jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs;
 
     return (
@@ -594,7 +681,7 @@ function JobManagement({ films, jobs, orders, db, userId }) {
                 </button>
             </div>
             {showForm && <JobForm films={films} onSubmit={handleJobSubmit} onCancel={() => { setShowForm(false); setEditingJob(null); }} initialData={editingJob} />}
-            <JobList films={films} jobs={filteredJobs} allJobs={jobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} />
+            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} onEditHistory={setEditingHistoryEntry} />
             <ConfirmationModal
                 isOpen={isDeleteModalOpen}
                 onClose={closeDeleteModal}
@@ -612,6 +699,14 @@ function JobManagement({ films, jobs, orders, db, userId }) {
             >
                 {messageModalContent.body}
             </MessageModal>
+            <FilmHistoryEditModal 
+                isOpen={!!editingHistoryEntry}
+                onClose={() => setEditingHistoryEntry(null)}
+                onUpdate={handleUpdateHistory}
+                onDelete={handleDeleteAndRestore}
+                historyEntry={editingHistoryEntry}
+                jobs={jobs}
+            />
         </section>
     );
 }
@@ -718,18 +813,16 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
     );
 }
 
-function JobList({ films, jobs, allJobs, onDelete, onEdit, db, userId }) {
+function JobList({ films, jobs, onDelete, onEdit, db, userId, onEditHistory }) {
     if (jobs.length === 0) return <p className="text-center text-gray-500 py-8">No jobs found.</p>;
-    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} films={films} allJobs={allJobs} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} />)}</div>;
+    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} onEditHistory={onEditHistory} />)}</div>;
 }
 
-function JobCard({ job, films, allJobs, onDelete, onEdit, db, userId }) {
+function JobCard({ job, films, onDelete, onEdit, db, userId, onEditHistory }) {
     const [showHistory, setShowHistory] = useState(false);
     const [showStock, setShowStock] = useState(false);
     const [history, setHistory] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
-    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
 
     const toggleHistory = () => {
         setShowHistory(prev => !prev);
@@ -749,164 +842,72 @@ function JobCard({ job, films, allJobs, onDelete, onEdit, db, userId }) {
         return () => unsubscribe();
     }, [showHistory, db, userId, job.id]);
 
-
-    const handleUpdateHistoryInJob = async (historyEntry, { newDate, newJobId }) => {
-        if (!historyEntry || !newJobId) {
-             setMessageModal({isOpen: true, title: "Update Error", body: "Cannot update entry without a valid job."});
-             return;
-        }
-
-        const oldJobId = historyEntry.jobId;
-        const isJobChanged = oldJobId !== newJobId;
-        const newConsumedAt = new Date(newDate + 'T00:00:00Z');
-
-        if (!isJobChanged && newConsumedAt.getTime() === historyEntry.consumedAt.toDate().getTime()) {
-            setEditingHistoryEntry(null);
-            return;
-        }
-
-        const batch = writeBatch(db);
-        const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${oldJobId}/consumedRolls`, historyEntry.id);
-
-        if (isJobChanged) {
-            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJobId}/consumedRolls`));
-            const newJob = allJobs.find(j => j.id === newJobId);
-            
-            const updatedData = {
-                ...historyEntry,
-                consumedAt: newConsumedAt,
-                jobId: newJobId,
-                jobName: newJob ? newJob.jobName : 'Unknown Job'
-            };
-            delete updatedData.id; 
-
-            batch.set(newHistoryRef, updatedData);
-            batch.delete(oldHistoryRef);
-        } else {
-            batch.update(oldHistoryRef, { consumedAt: newConsumedAt });
-        }
-
-        try {
-            await batch.commit();
-            setMessageModal({isOpen: true, title: "Success", body: "History entry has been updated."});
-        } catch (error) {
-            console.error("Error updating history entry:", error);
-            setMessageModal({isOpen: true, title: "Error", body: "Failed to update history entry."});
-        } finally {
-            setEditingHistoryEntry(null);
-        }
-    };
-
-    const handleDeleteAndRestoreInJob = async (historyEntry) => {
-         if (!historyEntry || !historyEntry.originalId) {
-            setMessageModal({isOpen: true, title: "Restore Error", body: "Cannot restore roll: original ID is missing."});
-            return;
-        }
-        
-        const batch = writeBatch(db);
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
-        const filmRefToRestore = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
-
-        const restoredFilmData = {
-            filmType: historyEntry.filmType,
-            netWeight: historyEntry.netWeight,
-            currentWeight: historyEntry.netWeight, 
-            supplier: historyEntry.supplier,
-            purchaseDate: historyEntry.purchaseDate,
-            createdAt: historyEntry.createdAt,
-        };
-
-        batch.set(filmRefToRestore, restoredFilmData);
-        batch.delete(historyRef);
-
-        try {
-            await batch.commit();
-            setMessageModal({isOpen: true, title: "Success", body: "Roll has been restored to the main stock inventory."});
-        } catch (error) {
-            console.error("Error deleting and restoring roll:", error);
-            setMessageModal({isOpen: true, title: "Error", body: "An error occurred during the restore process."});
-        } finally {
-            setEditingHistoryEntry(null);
-        }
-    };
-
     return (
-        <>
-            <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>{messageModal.body}</MessageModal>
-            <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-gray-600">
-                <div className="flex justify-between items-start">
-                    <div>
-                        <h3 className="font-bold text-xl text-gray-100">{job.jobName}</h3>
-                        <p className="text-gray-400">{job.jobSize}</p>
-                        <p className="text-xs text-gray-500">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
-                    </div>
-                    <div className="flex items-center space-x-3">
-                         <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                         <button onClick={() => setShowStock(!showStock)} className="flex items-center text-sm text-yellow-400 hover:text-yellow-300 transition-colors">
-                            <ClipboardListIcon />
-                            <span className="ml-1">{showStock ? 'Hide' : 'View'} Stock</span>
-                         </button>
-                         <button onClick={toggleHistory} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors">
-                            <HistoryIcon />
-                            <span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span>
-                        </button>
-                        <button onClick={() => onDelete(job)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
-                    </div>
+        <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-gray-600">
+            <div className="flex justify-between items-start">
+                <div>
+                    <h3 className="font-bold text-xl text-gray-100">{job.jobName}</h3>
+                    <p className="text-gray-400">{job.jobSize}</p>
+                    <p className="text-xs text-gray-500">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
                 </div>
-                {showStock && (
-                    <div className="mt-4 border-t border-gray-700 pt-4">
-                        <h4 className="font-semibold text-lg text-yellow-400 mb-3">Required Stock Status</h4>
-                        {(job.materials && job.materials.length > 0) ? job.materials.map(material => {
-                            const matchingFilms = films.filter(film => film.filmType.toLowerCase() === material.toLowerCase() && film.currentWeight > 0);
-                            const totalWeight = matchingFilms.reduce((sum, film) => sum + (film.currentWeight || 0), 0);
-                            return (
-                                <div key={material} className="mt-2 p-3 bg-gray-700/50 rounded-lg">
-                                    <div className="flex justify-between items-center">
-                                        <h5 className="font-bold text-gray-200">{material}</h5>
-                                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${matchingFilms.length > 0 ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                                            {matchingFilms.length > 0 ? 'In Stock' : 'Out of Stock'}
-                                        </span>
-                                    </div>
-                                    {matchingFilms.length > 0 && (
-                                        <div className="text-sm text-gray-400 mt-2">
-                                            <p>{matchingFilms.length} roll(s) available. Total Weight: {totalWeight.toFixed(2)} kg</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )
-                        }) : <p className="text-gray-500">No materials specified for this job.</p>}
-                    </div>
-                )}
-                {showHistory && (
-                    <div className="mt-4 border-t border-gray-700 pt-4">
-                        <h4 className="font-semibold text-lg text-cyan-400 mb-2">Consumed Roll History</h4>
-                        {isLoadingHistory ? <p>Loading history...</p> : (
-                            history.length > 0 ? (
-                                <ul className="space-y-2">
-                                    {history.map(roll => (
-                                        <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
-                                            <div>
-                                                <p className="font-semibold">{roll.filmType}</p>
-                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p>
-                                            </div>
-                                            <button onClick={() => setEditingHistoryEntry(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : <p>No rolls have been consumed for this job.</p>
-                        )}
-                    </div>
-                )}
+                <div className="flex items-center space-x-3">
+                     <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                     <button onClick={() => setShowStock(!showStock)} className="flex items-center text-sm text-yellow-400 hover:text-yellow-300 transition-colors">
+                        <ClipboardListIcon />
+                        <span className="ml-1">{showStock ? 'Hide' : 'View'} Stock</span>
+                     </button>
+                     <button onClick={toggleHistory} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors">
+                        <HistoryIcon />
+                        <span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span>
+                    </button>
+                    <button onClick={() => onDelete(job)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
+                </div>
             </div>
-            <FilmHistoryEditModal
-                isOpen={!!editingHistoryEntry}
-                onClose={() => setEditingHistoryEntry(null)}
-                onUpdate={handleUpdateHistoryInJob}
-                onDelete={handleDeleteAndRestoreInJob}
-                historyEntry={editingHistoryEntry}
-                jobs={allJobs}
-            />
-        </>
+            {showStock && (
+                <div className="mt-4 border-t border-gray-700 pt-4">
+                    <h4 className="font-semibold text-lg text-yellow-400 mb-3">Required Stock Status</h4>
+                    {(job.materials && job.materials.length > 0) ? job.materials.map(material => {
+                        const matchingFilms = films.filter(film => film.filmType.toLowerCase() === material.toLowerCase() && film.currentWeight > 0);
+                        const totalWeight = matchingFilms.reduce((sum, film) => sum + (film.currentWeight || 0), 0);
+                        return (
+                            <div key={material} className="mt-2 p-3 bg-gray-700/50 rounded-lg">
+                                <div className="flex justify-between items-center">
+                                    <h5 className="font-bold text-gray-200">{material}</h5>
+                                    <span className={`px-2 py-1 text-xs font-bold rounded-full ${matchingFilms.length > 0 ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                                        {matchingFilms.length > 0 ? 'In Stock' : 'Out of Stock'}
+                                    </span>
+                                </div>
+                                {matchingFilms.length > 0 && (
+                                    <div className="text-sm text-gray-400 mt-2">
+                                        <p>{matchingFilms.length} roll(s) available. Total Weight: {totalWeight.toFixed(2)} kg</p>
+                                    </div>
+                                )}
+                            </div>
+                        )
+                    }) : <p className="text-gray-500">No materials specified for this job.</p>}
+                </div>
+            )}
+            {showHistory && (
+                <div className="mt-4 border-t border-gray-700 pt-4">
+                    <h4 className="font-semibold text-lg text-cyan-400 mb-2">Consumed Roll History</h4>
+                    {isLoadingHistory ? <p>Loading history...</p> : (
+                        history.length > 0 ? (
+                            <ul className="space-y-2">
+                                {history.map(roll => (
+                                    <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
+                                        <div>
+                                            <p className="font-semibold">{roll.filmType}</p>
+                                            <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p>
+                                        </div>
+                                        <button onClick={() => onEditHistory(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : <p>No rolls have been consumed for this job.</p>
+                    )}
+                </div>
+            )}
+        </div>
     );
 }
 
