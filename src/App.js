@@ -69,7 +69,7 @@ function LoginScreen({ auth }) {
         try {
             await signInWithEmailAndPassword(auth, email, password);
         } catch (error) {
-            setError('Failed to log in. This may be due to environment restrictions.');
+            setError('Failed to log in. Please check your email and password.');
             console.error("Login Error:", error);
         }
     };
