@@ -1,8 +1,8 @@
-/* global __firebase_config, __app_id */
+/* global __firebase_config, __app_id, __initial_auth_token */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setDoc } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signOut, signInWithEmailAndPassword } from 'firebase/auth';
 
 // --- Firebase Configuration ---
 // In a real-world app, use environment variables. For this example, we'll use the globals provided.
@@ -57,50 +57,6 @@ const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className
 const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-cyan-400 mb-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>);
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 
-// --- Login Screen Component ---
-function LoginScreen({ auth }) {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
-
-    const handleLogin = async (e) => {
-        e.preventDefault();
-        setError('');
-        try {
-            await signInWithEmailAndPassword(auth, email, password);
-        } catch (error) {
-            setError('Failed to log in. Please check your email and password.');
-            console.error("Login Error:", error);
-        }
-    };
-
-    return (
-        <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
-            <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
-                <div className="flex flex-col items-center">
-                    <LockClosedIcon />
-                    <h1 className="text-3xl font-bold text-cyan-400 mb-2">Login</h1>
-                    <p className="text-gray-400 mb-6">Please enter your credentials</p>
-                </div>
-                <form onSubmit={handleLogin} className="space-y-6">
-                    <div>
-                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" autoComplete="email"
-                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
-                    </div>
-                    <div>
-                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password"
-                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
-                    </div>
-                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-                    <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-md transition-transform duration-200 hover:scale-105">
-                        Login
-                    </button>
-                </form>
-            </div>
-        </div>
-    );
-}
-
 // --- Main App Component ---
 function App() {
     const [user, setUser] = useState(null);
@@ -125,6 +81,31 @@ function App() {
                 setUser(user);
                 setIsAuthReady(true);
             });
+
+            // --- AUTO SIGN-IN LOGIC ---
+            const autoSignIn = async () => {
+                if (authInstance.currentUser) {
+                    setIsAuthReady(true);
+                    return;
+                }
+
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    try {
+                        await signInWithCustomToken(authInstance, __initial_auth_token);
+                    } catch (error) {
+                        console.error("Custom token sign-in failed. Falling back to anonymous.", error);
+                        await signInAnonymously(authInstance);
+                    }
+                } else {
+                    try {
+                        await signInAnonymously(authInstance);
+                    } catch (error) {
+                        console.error("Anonymous sign-in failed.", error);
+                    }
+                }
+            };
+
+            autoSignIn();
 
             return () => unsubscribe();
         } catch (e) {
@@ -192,16 +173,12 @@ function App() {
         }
     };
     
-    if (!isAuthReady) {
+    if (!isAuthReady || !user) {
         return (
             <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-                <div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Initializing...</p></div>
+                <div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Initializing & Authenticating...</p></div>
             </div>
         );
-    }
-
-    if (!user) {
-        return <LoginScreen auth={auth} />;
     }
     
     if (isLoading) {
@@ -299,7 +276,10 @@ const Header = ({ user }) => (
         <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
         {user && (
             <div className="mt-2 text-xs text-yellow-300">
-                <p>Logged in as: {user.email}</p>
+                {user.isAnonymous 
+                    ? <p>Logged in as: Anonymous User ({user.uid.slice(0,8)}...)</p>
+                    : <p>Logged in as: {user.email}</p>
+                }
             </div>
         )}
         <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
