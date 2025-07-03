@@ -1,14 +1,18 @@
-/* global __firebase_config, __app_id, __initial_auth_token */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setDoc } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signOut } from 'firebase/auth';
+import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // --- Firebase Configuration ---
-// In a real-world app, use environment variables. For this example, we'll use the globals provided.
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
+const firebaseConfig = {
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID
+};
+const appId = process.env.REACT_APP_FIREBASE_APP_ID;
 
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
@@ -57,6 +61,50 @@ const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className
 const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-cyan-400 mb-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>);
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 
+// --- Login Screen Component ---
+function LoginScreen({ auth }) {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleLogin = async (e) => {
+        e.preventDefault();
+        setError('');
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+        } catch (error) {
+            setError('Failed to log in. Please check your email and password.');
+            console.error("Login Error:", error);
+        }
+    };
+
+    return (
+        <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
+            <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
+                <div className="flex flex-col items-center">
+                    <LockClosedIcon />
+                    <h1 className="text-3xl font-bold text-cyan-400 mb-2">Login</h1>
+                    <p className="text-gray-400 mb-6">Please enter your credentials</p>
+                </div>
+                <form onSubmit={handleLogin} className="space-y-6">
+                    <div>
+                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" autoComplete="email"
+                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                    </div>
+                    <div>
+                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password"
+                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                    </div>
+                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                    <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-md transition-transform duration-200 hover:scale-105">
+                        Login
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+}
+
 // --- Main App Component ---
 function App() {
     const [user, setUser] = useState(null);
@@ -70,58 +118,26 @@ function App() {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        try {
-            const app = initializeApp(firebaseConfig);
-            const firestore = getFirestore(app);
-            const authInstance = getAuth(app);
-            setDb(firestore);
-            setAuth(authInstance);
+        const app = initializeApp(firebaseConfig);
+        const firestore = getFirestore(app);
+        const authInstance = getAuth(app);
+        setDb(firestore);
+        setAuth(authInstance);
 
-            const unsubscribe = onAuthStateChanged(authInstance, (user) => {
-                setUser(user);
-                setIsAuthReady(true);
-            });
-
-            // --- AUTO SIGN-IN LOGIC ---
-            const autoSignIn = async () => {
-                if (authInstance.currentUser) {
-                    setIsAuthReady(true);
-                    return;
-                }
-
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    try {
-                        await signInWithCustomToken(authInstance, __initial_auth_token);
-                    } catch (error) {
-                        console.error("Custom token sign-in failed. Falling back to anonymous.", error);
-                        await signInAnonymously(authInstance);
-                    }
-                } else {
-                    try {
-                        await signInAnonymously(authInstance);
-                    } catch (error) {
-                        console.error("Anonymous sign-in failed.", error);
-                    }
-                }
-            };
-
-            autoSignIn();
-
-            return () => unsubscribe();
-        } catch (e) {
-            console.error("Firebase initialization failed:", e);
+        const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+            setUser(user);
             setIsAuthReady(true);
-            setIsLoading(false);
-        }
+        });
+
+        return () => unsubscribe();
     }, []);
 
     useEffect(() => {
-        if (!user) {
-            setIsLoading(false); // If there's no user, stop loading.
-            setFilms([]);
-            setJobs([]);
-            setOrders([]);
-            return;
+        if (!isAuthReady || !db || !user) {
+          if (isAuthReady) { 
+            setIsLoading(false);
+          }
+          return;
         }
 
         setIsLoading(true);
@@ -144,39 +160,33 @@ function App() {
             setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => console.error("Error fetching orders:", error));
 
-        const allUnsubscribes = [unsubscribeFilms, unsubscribeJobs, unsubscribeOrders];
-        
-        const fetchData = async () => {
-            try {
-                await Promise.all([
-                    getDocs(qFilms), getDocs(qJobs), getDocs(qOrders)
-                ]);
-            } catch (error) {
-                console.error("Error during initial data fetch:", error);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        fetchData();
+        Promise.all([
+            getDocs(qFilms), getDocs(qJobs), getDocs(qOrders)
+        ]).catch(console.error).finally(() => setIsLoading(false));
 
         return () => {
-            allUnsubscribes.forEach(unsub => unsub());
+             unsubscribeFilms();
+             unsubscribeJobs();
+             unsubscribeOrders();
         };
-    }, [db, user]);
+    }, [isAuthReady, db, user]);
 
     const handleLogout = () => {
         if(auth) {
-            signOut(auth).catch(console.error);
+            signOut(auth);
         }
     };
     
-    if (!isAuthReady || !user) {
+    if (!isAuthReady) {
         return (
             <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-                <div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Initializing & Authenticating...</p></div>
+                <div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Initializing...</p></div>
             </div>
         );
+    }
+
+    if (!user) {
+        return <LoginScreen auth={auth} />;
     }
     
     if (isLoading) {
@@ -192,9 +202,9 @@ function App() {
             <div className="container mx-auto p-4 md:p-8">
                 <Header user={user} />
                 <Nav view={view} setView={setView} />
-                <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-                    Logout
-                </button>
+                 <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                     Logout
+                 </button>
                 <main className="mt-8">
                     {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} />}
                     {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
@@ -208,7 +218,7 @@ function App() {
 }
 
 // --- MODAL AND HEADER COMPONENTS ---
-const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children, confirmText = "Confirm", confirmColor = "bg-red-600 hover:bg-red-700" }) => {
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children }) => {
     if (!isOpen) return null;
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
@@ -220,7 +230,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children, confir
                 <div className="text-gray-300 mb-6">{children}</div>
                 <div className="flex justify-center gap-4">
                     <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">Cancel</button>
-                    <button onClick={onConfirm} className={`${confirmColor} text-white font-bold py-2 px-6 rounded-lg transition-colors`}>{confirmText}</button>
+                    <button onClick={onConfirm} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">Confirm Delete</button>
                 </div>
             </div>
         </div>
@@ -258,7 +268,7 @@ const MarkCompleteModal = ({ isOpen, onClose, onConfirm, order }) => {
 const MessageModal = ({ isOpen, onClose, title, children }) => {
     if (!isOpen) return null;
     return (
-       <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 text-center">
                 <h3 className="text-2xl font-bold text-cyan-400 mb-4">{title}</h3>
                 <div className="text-gray-300 mb-6">{children}</div>
@@ -273,12 +283,9 @@ const Header = ({ user }) => (
         <h2 className="text-2xl font-semibold text-gray-300">SHRI GURUNANAK INDUSTRIES</h2>
         <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
         {user && (
-            <div className="mt-2 text-xs text-yellow-300">
-                {user.isAnonymous 
-                    ? <p>Logged in as: Anonymous User ({user.uid.slice(0,8)}...)</p>
-                    : <p>Logged in as: {user.email}</p>
-                }
-            </div>
+          <div className="mt-2 text-xs text-yellow-300">
+            <p>Logged in as: {user.email}</p>
+          </div>
         )}
         <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
     </header>
@@ -373,7 +380,6 @@ function FilmInventory({ films, db, userId }) {
                 onClose={closeDeleteModal}
                 onConfirm={executeDelete}
                 title="Delete Film Roll?"
-                confirmText="Confirm Delete"
             >
               <p>Are you sure you want to delete this <strong className="text-white">{filmToDelete?.filmType}</strong> roll?</p>
               <p className="mt-2">This action cannot be undone.</p>
@@ -489,6 +495,54 @@ function FilmList({ films, onEdit, onDelete }) {
 }
 
 // --- JOB MANAGEMENT COMPONENTS ---
+function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
+    const [consumedAt, setConsumedAt] = useState('');
+
+    useEffect(() => {
+        if (historyEntry) {
+            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
+        }
+    }, [historyEntry]);
+
+    if (!isOpen) return null;
+
+    const handleDelete = () => {
+        if (window.confirm("Are you sure you want to delete this history entry? This cannot be undone.")) {
+            onDelete(historyEntry.id);
+        }
+    }
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Film Type</label>
+                        <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.filmType}</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
+                        <input
+                            type="date"
+                            value={consumedAt}
+                            onChange={(e) => setConsumedAt(e.target.value)}
+                            className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        />
+                    </div>
+                </div>
+                <div className="flex justify-between mt-6 gap-4">
+                    <button onClick={handleDelete} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete Entry</button>
+                    <div>
+                        <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg mr-2">Cancel</button>
+                        <button onClick={() => onSave(historyEntry.id, consumedAt)} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function JobManagement({ films, jobs, orders, db, userId }) {
     const [showForm, setShowForm] = useState(false);
     const [editingJob, setEditingJob] = useState(null);
@@ -497,7 +551,6 @@ function JobManagement({ films, jobs, orders, db, userId }) {
     const [jobToDelete, setJobToDelete] = useState(null);
     const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
     const [messageModalContent, setMessageModalContent] = useState({title: '', body: ''});
-    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
 
     const handleJobSubmit = async (jobData) => {
         if (!db || !userId) return;
@@ -559,92 +612,6 @@ function JobManagement({ films, jobs, orders, db, userId }) {
         }
     };
     
-    const handleUpdateHistory = async (historyEntry, { newDate, newJobId }) => {
-        if (!historyEntry || !newJobId) {
-             setMessageModalContent({title: "Update Error", body: "Cannot update entry without a valid job."});
-             setIsMessageModalOpen(true);
-             return;
-        }
-
-        const oldJobId = historyEntry.jobId;
-        const isJobChanged = oldJobId !== newJobId;
-        const newConsumedAt = new Date(newDate + 'T00:00:00Z');
-
-        if (!isJobChanged && newConsumedAt.getTime() === historyEntry.consumedAt.toDate().getTime()) {
-            setEditingHistoryEntry(null);
-            return;
-        }
-
-        const batch = writeBatch(db);
-        const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${oldJobId}/consumedRolls`, historyEntry.id);
-
-        if (isJobChanged) {
-            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJobId}/consumedRolls`));
-            const newJob = jobs.find(j => j.id === newJobId);
-            
-            const updatedData = {
-                ...historyEntry,
-                consumedAt: newConsumedAt,
-                jobId: newJobId,
-                jobName: newJob ? newJob.jobName : 'Unknown Job'
-            };
-            delete updatedData.id; 
-
-            batch.set(newHistoryRef, updatedData);
-            batch.delete(oldHistoryRef);
-        } else {
-            batch.update(oldHistoryRef, { consumedAt: newConsumedAt });
-        }
-
-        try {
-            await batch.commit();
-            setMessageModalContent({title: "Success", body: "History entry has been updated."});
-            setIsMessageModalOpen(true);
-        } catch (error) {
-            console.error("Error updating history entry:", error);
-            setMessageModalContent({title: "Error", body: "Failed to update history entry."});
-            setIsMessageModalOpen(true);
-        } finally {
-            setEditingHistoryEntry(null);
-        }
-    };
-
-    const handleDeleteAndRestore = async (historyEntry) => {
-         if (!historyEntry || !historyEntry.originalId) {
-            setMessageModalContent({title: "Restore Error", body: "Cannot restore roll: original ID is missing."});
-            setIsMessageModalOpen(true);
-            return;
-        }
-        
-        const batch = writeBatch(db);
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
-        const filmRefToRestore = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
-
-        const restoredFilmData = {
-            filmType: historyEntry.filmType,
-            netWeight: historyEntry.netWeight,
-            currentWeight: historyEntry.netWeight, 
-            supplier: historyEntry.supplier,
-            purchaseDate: historyEntry.purchaseDate,
-            createdAt: historyEntry.createdAt,
-        };
-
-        batch.set(filmRefToRestore, restoredFilmData);
-        batch.delete(historyRef);
-
-        try {
-            await batch.commit();
-            setMessageModalContent({title: "Success", body: "Roll has been restored to the main stock inventory."});
-            setIsMessageModalOpen(true);
-        } catch (error) {
-            console.error("Error deleting and restoring roll:", error);
-            setMessageModalContent({title: "Error", body: "An error occurred during the restore process."});
-            setIsMessageModalOpen(true);
-        } finally {
-            setEditingHistoryEntry(null);
-        }
-    };
-
     const filteredJobs = jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs;
 
     return (
@@ -660,13 +627,12 @@ function JobManagement({ films, jobs, orders, db, userId }) {
                 </button>
             </div>
             {showForm && <JobForm films={films} onSubmit={handleJobSubmit} onCancel={() => { setShowForm(false); setEditingJob(null); }} initialData={editingJob} />}
-            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} onEditHistory={setEditingHistoryEntry} />
+            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} />
             <ConfirmationModal
                 isOpen={isDeleteModalOpen}
                 onClose={closeDeleteModal}
                 onConfirm={executeDeleteJob}
                 title="Delete Job?"
-                confirmText="Confirm Delete"
             >
                 <p>Are you sure you want to delete the job <strong className="text-white">{jobToDelete?.jobName}</strong>?</p>
                 <p className="mt-2">This will also delete its entire consumption history. This action cannot be undone.</p>
@@ -678,14 +644,6 @@ function JobManagement({ films, jobs, orders, db, userId }) {
             >
                 {messageModalContent.body}
             </MessageModal>
-            <FilmHistoryEditModal 
-                isOpen={!!editingHistoryEntry}
-                onClose={() => setEditingHistoryEntry(null)}
-                onUpdate={handleUpdateHistory}
-                onDelete={handleDeleteAndRestore}
-                historyEntry={editingHistoryEntry}
-                jobs={jobs}
-            />
         </section>
     );
 }
@@ -779,7 +737,7 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
                                 </div>
                                 <button type="button" onClick={() => removeMaterial(index)} className="text-red-500 hover:text-red-400 p-2 rounded-full bg-gray-700"><TrashIcon /></button>
                             </div>
-                           );
+                         );
                     })}
                     <button type="button" onClick={addMaterial} className="mt-2 text-cyan-400 hover:text-cyan-300 text-sm">+ Add Material</button>
                 </div>
@@ -792,16 +750,17 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
     );
 }
 
-function JobList({ films, jobs, onDelete, onEdit, db, userId, onEditHistory }) {
+function JobList({ films, jobs, onDelete, onEdit, db, userId }) {
     if (jobs.length === 0) return <p className="text-center text-gray-500 py-8">No jobs found.</p>;
-    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} onEditHistory={onEditHistory} />)}</div>;
+    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} />)}</div>;
 }
 
-function JobCard({ job, films, onDelete, onEdit, db, userId, onEditHistory }) {
+function JobCard({ job, films, onDelete, onEdit, db, userId }) {
     const [showHistory, setShowHistory] = useState(false);
     const [showStock, setShowStock] = useState(false);
     const [history, setHistory] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
 
     const toggleHistory = () => {
         setShowHistory(prev => !prev);
@@ -821,72 +780,102 @@ function JobCard({ job, films, onDelete, onEdit, db, userId, onEditHistory }) {
         return () => unsubscribe();
     }, [showHistory, db, userId, job.id]);
 
+
+    const handleUpdateHistory = async (historyId, newDate) => {
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`, historyId);
+        try {
+            await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+            setEditingHistoryEntry(null);
+        } catch (error) {
+            console.error("Error updating history entry:", error);
+        }
+    };
+    
+    const handleDeleteHistory = async (historyId) => {
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`, historyId);
+        try {
+            await deleteDoc(historyRef);
+            setEditingHistoryEntry(null);
+        } catch (error) {
+            console.error("Error deleting history entry:", error);
+        }
+    };
+
     return (
-        <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-gray-600">
-            <div className="flex justify-between items-start">
-                <div>
-                    <h3 className="font-bold text-xl text-gray-100">{job.jobName}</h3>
-                    <p className="text-gray-400">{job.jobSize}</p>
-                    <p className="text-xs text-gray-500">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
+        <>
+            <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-gray-600">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h3 className="font-bold text-xl text-gray-100">{job.jobName}</h3>
+                        <p className="text-gray-400">{job.jobSize}</p>
+                        <p className="text-xs text-gray-500">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                         <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                         <button onClick={() => setShowStock(!showStock)} className="flex items-center text-sm text-yellow-400 hover:text-yellow-300 transition-colors">
+                            <ClipboardListIcon />
+                            <span className="ml-1">{showStock ? 'Hide' : 'View'} Stock</span>
+                         </button>
+                         <button onClick={toggleHistory} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors">
+                            <HistoryIcon />
+                            <span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span>
+                        </button>
+                        <button onClick={() => onDelete(job)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
+                    </div>
                 </div>
-                <div className="flex items-center space-x-3">
-                     <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                     <button onClick={() => setShowStock(!showStock)} className="flex items-center text-sm text-yellow-400 hover:text-yellow-300 transition-colors">
-                        <ClipboardListIcon />
-                        <span className="ml-1">{showStock ? 'Hide' : 'View'} Stock</span>
-                     </button>
-                     <button onClick={toggleHistory} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors">
-                        <HistoryIcon />
-                        <span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span>
-                    </button>
-                    <button onClick={() => onDelete(job)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
-                </div>
-            </div>
-            {showStock && (
-                <div className="mt-4 border-t border-gray-700 pt-4">
-                    <h4 className="font-semibold text-lg text-yellow-400 mb-3">Required Stock Status</h4>
-                    {(job.materials && job.materials.length > 0) ? job.materials.map(material => {
-                        const matchingFilms = films.filter(film => film.filmType.toLowerCase() === material.toLowerCase() && film.currentWeight > 0);
-                        const totalWeight = matchingFilms.reduce((sum, film) => sum + (film.currentWeight || 0), 0);
-                        return (
-                            <div key={material} className="mt-2 p-3 bg-gray-700/50 rounded-lg">
-                                <div className="flex justify-between items-center">
-                                    <h5 className="font-bold text-gray-200">{material}</h5>
-                                    <span className={`px-2 py-1 text-xs font-bold rounded-full ${matchingFilms.length > 0 ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
-                                        {matchingFilms.length > 0 ? 'In Stock' : 'Out of Stock'}
-                                    </span>
-                                </div>
-                                {matchingFilms.length > 0 && (
-                                    <div className="text-sm text-gray-400 mt-2">
-                                        <p>{matchingFilms.length} roll(s) available. Total Weight: {totalWeight.toFixed(2)} kg</p>
+                {showStock && (
+                    <div className="mt-4 border-t border-gray-700 pt-4">
+                        <h4 className="font-semibold text-lg text-yellow-400 mb-3">Required Stock Status</h4>
+                        {(job.materials && job.materials.length > 0) ? job.materials.map(material => {
+                            const matchingFilms = films.filter(film => film.filmType.toLowerCase() === material.toLowerCase() && film.currentWeight > 0);
+                            const totalWeight = matchingFilms.reduce((sum, film) => sum + (film.currentWeight || 0), 0);
+                            return (
+                                <div key={material} className="mt-2 p-3 bg-gray-700/50 rounded-lg">
+                                    <div className="flex justify-between items-center">
+                                        <h5 className="font-bold text-gray-200">{material}</h5>
+                                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${matchingFilms.length > 0 ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+                                            {matchingFilms.length > 0 ? 'In Stock' : 'Out of Stock'}
+                                        </span>
                                     </div>
-                                )}
-                            </div>
-                        )
-                    }) : <p className="text-gray-500">No materials specified for this job.</p>}
-                </div>
-            )}
-            {showHistory && (
-                <div className="mt-4 border-t border-gray-700 pt-4">
-                    <h4 className="font-semibold text-lg text-cyan-400 mb-2">Consumed Roll History</h4>
-                    {isLoadingHistory ? <p>Loading history...</p> : (
-                        history.length > 0 ? (
-                            <ul className="space-y-2">
-                                {history.map(roll => (
-                                    <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
-                                        <div>
-                                            <p className="font-semibold">{roll.filmType}</p>
-                                            <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p>
+                                    {matchingFilms.length > 0 && (
+                                        <div className="text-sm text-gray-400 mt-2">
+                                            <p>{matchingFilms.length} roll(s) available. Total Weight: {totalWeight.toFixed(2)} kg</p>
                                         </div>
-                                        <button onClick={() => onEditHistory(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
-                                    </li>
-                                ))}
-                            </ul>
-                        ) : <p>No rolls have been consumed for this job.</p>
-                    )}
-                </div>
-            )}
-        </div>
+                                    )}
+                                </div>
+                            )
+                        }) : <p className="text-gray-500">No materials specified for this job.</p>}
+                    </div>
+                )}
+                {showHistory && (
+                    <div className="mt-4 border-t border-gray-700 pt-4">
+                        <h4 className="font-semibold text-lg text-cyan-400 mb-2">Consumed Roll History</h4>
+                        {isLoadingHistory ? <p>Loading history...</p> : (
+                            history.length > 0 ? (
+                                <ul className="space-y-2">
+                                    {history.map(roll => (
+                                        <li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center">
+                                            <div>
+                                                <p className="font-semibold">{roll.filmType}</p>
+                                                <p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p>
+                                            </div>
+                                            <button onClick={() => setEditingHistoryEntry(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : <p>No rolls have been consumed for this job.</p>
+                        )}
+                    </div>
+                )}
+            </div>
+            <EditHistoryModal 
+                isOpen={!!editingHistoryEntry}
+                onClose={() => setEditingHistoryEntry(null)}
+                onSave={handleUpdateHistory}
+                onDelete={handleDeleteHistory}
+                historyEntry={editingHistoryEntry}
+            />
+        </>
     );
 }
 
@@ -990,7 +979,6 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
                 onClose={closeDeleteModal}
                 onConfirm={executeDeleteOrder}
                 title="Delete Order?"
-                confirmText="Confirm Delete"
             >
                 <p>Are you sure you want to delete the order <strong className="text-white">{orderToDelete?.orderName}</strong>?</p>
                 <p className="mt-2">This action cannot be undone.</p>
@@ -1397,112 +1385,11 @@ function UseStock({ films, jobs, db, userId, setView }) {
 }
 
 // --- GLOBAL FILM HISTORY ---
-
-/**
- * NEW, more powerful modal for editing history entries from the global history page.
- */
-function FilmHistoryEditModal({ isOpen, onClose, onUpdate, onDelete, historyEntry, jobs }) {
-    const [consumedAt, setConsumedAt] = useState('');
-    const [jobId, setJobId] = useState('');
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-    useEffect(() => {
-        if (historyEntry) {
-            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
-            setJobId(historyEntry.jobId || '');
-        }
-    }, [historyEntry]);
-
-    if (!isOpen) return null;
-
-    const handleUpdate = () => {
-        onUpdate(historyEntry, { newDate: consumedAt, newJobId: jobId });
-    };
-
-    const handleDelete = () => {
-        onDelete(historyEntry);
-    };
-
-    return (
-        <>
-            <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
-                <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg m-4">
-                    <div className="flex justify-between items-center">
-                        <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
-                        <button onClick={onClose} className="text-gray-400 hover:text-white"><XIcon /></button>
-                    </div>
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-400">Film Type</label>
-                            <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.filmType}</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-400">Original Weight</label>
-                                <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.netWeight.toFixed(2)} kg</p>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-400">Supplier</label>
-                                <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.supplier}</p>
-                            </div>
-                        </div>
-                        <div>
-                            <label htmlFor="date-input" className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
-                            <input
-                                id="date-input"
-                                type="date"
-                                value={consumedAt}
-                                onChange={(e) => setConsumedAt(e.target.value)}
-                                className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="job-select" className="block text-sm font-medium text-gray-300 mb-1">Assign to Job</label>
-                            <select
-                                id="job-select"
-                                value={jobId}
-                                onChange={(e) => setJobId(e.target.value)}
-                                className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-                            >
-                                <option value="">-- Select a Job --</option>
-                                {jobs.map(job => (
-                                    <option key={job.id} value={job.id}>{job.jobName}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-                    <div className="flex justify-between mt-6 gap-4">
-                        <button onClick={() => setShowDeleteConfirm(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete & Restore</button>
-                        <div>
-                            <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg mr-2">Cancel</button>
-                            <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update Entry</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <ConfirmationModal
-                isOpen={showDeleteConfirm}
-                onClose={() => setShowDeleteConfirm(false)}
-                onConfirm={handleDelete}
-                title="Restore Roll to Stock?"
-                confirmText="Yes, Restore It"
-                confirmColor="bg-yellow-500 hover:bg-yellow-600"
-            >
-                <p>Are you sure you want to delete this history record?</p>
-                <p className="mt-4 font-semibold text-yellow-300">The original film roll will be added back to your main stock inventory.</p>
-                <p className="mt-2 text-sm">This action is for correcting mistakes.</p>
-            </ConfirmationModal>
-        </>
-    );
-}
-
-
-function FilmHistory({ db, userId, jobs }) {
+function FilmHistory({ db, userId }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [historySearch, setHistorySearch] = useState('');
     const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
-    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
 
     useEffect(() => {
         if (!db || !userId) {
@@ -1542,87 +1429,30 @@ function FilmHistory({ db, userId, jobs }) {
         return () => unsubscribe();
     }, [db, userId]);
 
-    const handleUpdateHistory = async (historyEntry, { newDate, newJobId }) => {
-        if (!historyEntry || !newJobId) {
-             setMessageModal({isOpen: true, title: "Update Error", body: "Cannot update entry without a valid job."});
-             return;
-        }
-
-        const oldJobId = historyEntry.jobId;
-        const isJobChanged = oldJobId !== newJobId;
-        const newConsumedAt = new Date(newDate + 'T00:00:00Z');
-
-        if (!isJobChanged && newConsumedAt.getTime() === historyEntry.consumedAt.toDate().getTime()) {
-            setEditingHistoryEntry(null);
-            return;
-        }
-
-        const batch = writeBatch(db);
-        const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${oldJobId}/consumedRolls`, historyEntry.id);
-
-        if (isJobChanged) {
-            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJobId}/consumedRolls`));
-            const newJob = jobs.find(j => j.id === newJobId);
-            
-            const updatedData = {
-                ...historyEntry,
-                consumedAt: newConsumedAt,
-                jobId: newJobId,
-                jobName: newJob ? newJob.jobName : 'Unknown Job'
-            };
-            delete updatedData.id; 
-
-            batch.set(newHistoryRef, updatedData);
-            batch.delete(oldHistoryRef);
-        } else {
-            batch.update(oldHistoryRef, { consumedAt: newConsumedAt });
-        }
-
+    const handleUpdateHistory = async (historyId, newDate) => {
+        if (!editingHistoryEntry) return;
+        const { jobId } = editingHistoryEntry;
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
         try {
-            await batch.commit();
-            setMessageModal({isOpen: true, title: "Success", body: "History entry has been updated."});
+            await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+            setEditingHistoryEntry(null);
         } catch (error) {
             console.error("Error updating history entry:", error);
-            setMessageModal({isOpen: true, title: "Error", body: "Failed to update history entry."});
-        } finally {
-            setEditingHistoryEntry(null);
         }
     };
 
-    const handleDeleteAndRestore = async (historyEntry) => {
-        if (!historyEntry || !historyEntry.originalId) {
-            setMessageModal({isOpen: true, title: "Restore Error", body: "Cannot restore roll: original ID is missing."});
-            return;
-        }
-        
-        const batch = writeBatch(db);
-
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
-        
-        const filmRefToRestore = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
-
-        const restoredFilmData = {
-            filmType: historyEntry.filmType,
-            netWeight: historyEntry.netWeight,
-            currentWeight: historyEntry.netWeight, 
-            supplier: historyEntry.supplier,
-            purchaseDate: historyEntry.purchaseDate,
-            createdAt: historyEntry.createdAt,
-        };
-
-        batch.set(filmRefToRestore, restoredFilmData);
-        batch.delete(historyRef);
-
+    const handleDeleteHistory = async (historyId) => {
+        if (!editingHistoryEntry) return;
+        const { jobId } = editingHistoryEntry;
+        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
         try {
-            await batch.commit();
-            setMessageModal({isOpen: true, title: "Success", body: "Roll has been restored to the main stock inventory."});
-        } catch (error) {
-            console.error("Error deleting and restoring roll:", error);
-            setMessageModal({isOpen: true, title: "Error", body: "An error occurred during the restore process."});
-        } finally {
+            await deleteDoc(historyRef);
             setEditingHistoryEntry(null);
+        } catch (error) {
+            console.error("Error deleting history entry:", error);
         }
     };
+
 
     const filteredHistory = history.filter(item => {
         const searchTerm = historySearch.toLowerCase();
@@ -1633,12 +1463,9 @@ function FilmHistory({ db, userId, jobs }) {
 
     return(
         <section>
-            <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>
-                {messageModal.body}
-            </MessageModal>
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
                 <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
-                <div className="relative w-full md:w-1/2">
+                <div className="relative w-full md:w-full">
                     <input
                         type="text"
                         value={historySearch}
@@ -1665,13 +1492,12 @@ function FilmHistory({ db, userId, jobs }) {
                     )) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}
                 </div>
             )}
-            <FilmHistoryEditModal 
+            <EditHistoryModal 
                 isOpen={!!editingHistoryEntry}
                 onClose={() => setEditingHistoryEntry(null)}
-                onUpdate={handleUpdateHistory}
-                onDelete={handleDeleteAndRestore}
+                onSave={handleUpdateHistory}
+                onDelete={handleDeleteHistory}
                 historyEntry={editingHistoryEntry}
-                jobs={jobs}
             />
         </section>
     );
