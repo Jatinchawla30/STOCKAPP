@@ -1,18 +1,29 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setLogLevel, serverTimestamp } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
-// --- Firebase Configuration ---
+// --- PDF Library ---
+// This script is added to the head of the document to enable PDF generation.
+const jspdfScript = document.createElement('script');
+jspdfScript.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+document.head.appendChild(jspdfScript);
+
+const jspdfAutotableScript = document.createElement('script');
+jspdfAutotableScript.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js";
+document.head.appendChild(jspdfAutotableScript);
+
+
+// --- Firebase Configuration (Hardcoded to your project) ---
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
+    apiKey: "AIzaSyCMKc3d6o_pz82JUsQoNivQP28Yx8edrPg",
+    authDomain: "stock-manager-v2.firebaseapp.com",
+    projectId: "stock-manager-v2",
+    storageBucket: "stock-manager-v2.appspot.com",
+    messagingSenderId: "1076558999625",
+    appId: "1:1076558999625:web:027444deb458b1711f8f98"
 };
-const appId = process.env.REACT_APP_FIREBASE_APP_ID;
+const appId = "stock-manager-v2";
 
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
@@ -56,6 +67,7 @@ const ChevronLeftIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className
 const SearchIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>);
 const HistoryIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clipRule="evenodd" /></svg>);
 const ClipboardListIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>);
+const DownloadIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>);
 const XIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>);
 const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>);
 const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-cyan-400 mb-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>);
@@ -73,7 +85,13 @@ function LoginScreen({ auth }) {
         try {
             await signInWithEmailAndPassword(auth, email, password);
         } catch (error) {
-            setError('Failed to log in. Please check your email and password.');
+            if (error.code === 'auth/api-key-not-valid') {
+                setError('Login failed: Invalid API Key. Please ensure your Firebase config is correct and check for API key restrictions in your Google Cloud Console.');
+            } else if (error.code === 'auth/operation-not-allowed') {
+                setError(`Login failed: Email/Password sign-in is not enabled for project ${firebaseConfig.projectId}. Please double-check the setting in your Firebase console.`);
+            } else {
+                setError('Failed to log in. Please check your email and password.');
+            }
             console.error("Login Error:", error);
         }
     };
@@ -117,29 +135,42 @@ function App() {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
+    // Effect for initializing Firebase and handling authentication
     useEffect(() => {
+        setLogLevel('debug');
+        console.log("Initializing Firebase with Project ID:", firebaseConfig.projectId);
         const app = initializeApp(firebaseConfig);
         const firestore = getFirestore(app);
         const authInstance = getAuth(app);
         setDb(firestore);
         setAuth(authInstance);
 
+        // This listener simply reflects the auth state into React state.
         const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+            console.log("Auth state changed. User:", user ? user.uid : "null");
             setUser(user);
             setIsAuthReady(true);
         });
-
+        
         return () => unsubscribe();
     }, []);
 
+    // Effect for fetching data from Firestore, dependent on user authentication
     useEffect(() => {
+        // Do not proceed if auth isn't ready or user is not logged in.
         if (!isAuthReady || !db || !user) {
-          if (isAuthReady) { 
-            setIsLoading(false);
-          }
-          return;
+            // If auth check is complete but there's no user, stop loading.
+            if(isAuthReady) {
+                setIsLoading(false);
+            }
+            // Clear data on logout
+            setFilms([]);
+            setJobs([]);
+            setOrders([]);
+            return;
         }
 
+        console.log(`User authenticated (${user.uid}), fetching data...`);
         setIsLoading(true);
 
         const filmsPath = `artifacts/${appId}/users/${user.uid}/films`;
@@ -165,9 +196,9 @@ function App() {
         ]).catch(console.error).finally(() => setIsLoading(false));
 
         return () => {
-             unsubscribeFilms();
-             unsubscribeJobs();
-             unsubscribeOrders();
+              unsubscribeFilms();
+              unsubscribeJobs();
+              unsubscribeOrders();
         };
     }, [isAuthReady, db, user]);
 
@@ -199,7 +230,7 @@ function App() {
     
     return (
         <div className="bg-gray-900 min-h-screen font-sans text-white">
-            <div className="container mx-auto p-4 md:p-8">
+            <div className="container mx-auto p-4 md:p-8 relative">
                 <Header user={user} />
                 <Nav view={view} setView={setView} />
                  <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
@@ -207,10 +238,10 @@ function App() {
                  </button>
                 <main className="mt-8">
                     {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} />}
-                    {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
+                    {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} />}
                     {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
                     {view === 'use_stock' && <UseStock films={films} jobs={jobs} db={db} userId={user.uid} setView={setView} />}
-                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} />}
+                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} setView={setView} />}
                 </main>
             </div>
         </div>
@@ -283,9 +314,9 @@ const Header = ({ user }) => (
         <h2 className="text-2xl font-semibold text-gray-300">SHRI GURUNANAK INDUSTRIES</h2>
         <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
         {user && (
-          <div className="mt-2 text-xs text-yellow-300">
-            <p>Logged in as: {user.email}</p>
-          </div>
+            <div className="mt-2 text-xs text-yellow-300">
+                <p>Logged in as: {user.email || user.uid}</p>
+            </div>
         )}
         <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
     </header>
@@ -328,7 +359,7 @@ function FilmInventory({ films, db, userId }) {
                 await updateDoc(filmRef, dataToSave);
                 setEditingFilm(null);
             } else {
-                await addDoc(collection(db, filmsCollectionPath), { ...dataToSave, currentWeight: dataToSave.netWeight, createdAt: new Date() });
+                await addDoc(collection(db, filmsCollectionPath), { ...dataToSave, currentWeight: dataToSave.netWeight, createdAt: serverTimestamp() });
             }
             setShowForm(false);
         } catch (error) { console.error("Error saving film:", error); }
@@ -495,55 +526,7 @@ function FilmList({ films, onEdit, onDelete }) {
 }
 
 // --- JOB MANAGEMENT COMPONENTS ---
-function EditHistoryModal({ isOpen, onClose, onSave, onDelete, historyEntry }) {
-    const [consumedAt, setConsumedAt] = useState('');
-
-    useEffect(() => {
-        if (historyEntry) {
-            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
-        }
-    }, [historyEntry]);
-
-    if (!isOpen) return null;
-
-    const handleDelete = () => {
-        if (window.confirm("Are you sure you want to delete this history entry? This cannot be undone.")) {
-            onDelete(historyEntry.id);
-        }
-    }
-
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
-            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
-                <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-1">Film Type</label>
-                        <p className="text-white bg-gray-700 p-2 rounded-md">{historyEntry.filmType}</p>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
-                        <input
-                            type="date"
-                            value={consumedAt}
-                            onChange={(e) => setConsumedAt(e.target.value)}
-                            className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
-                        />
-                    </div>
-                </div>
-                <div className="flex justify-between mt-6 gap-4">
-                    <button onClick={handleDelete} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Delete Entry</button>
-                    <div>
-                        <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg mr-2">Cancel</button>
-                        <button onClick={() => onSave(historyEntry.id, consumedAt)} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function JobManagement({ films, jobs, orders, db, userId }) {
+function JobManagement({ films, jobs, orders, db, userId, setView }) {
     const [showForm, setShowForm] = useState(false);
     const [editingJob, setEditingJob] = useState(null);
     const [jobSearch, setJobSearch] = useState('');
@@ -627,7 +610,7 @@ function JobManagement({ films, jobs, orders, db, userId }) {
                 </button>
             </div>
             {showForm && <JobForm films={films} onSubmit={handleJobSubmit} onCancel={() => { setShowForm(false); setEditingJob(null); }} initialData={editingJob} />}
-            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} />
+            <JobList films={films} jobs={jobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} setView={setView} />
             <ConfirmationModal
                 isOpen={isDeleteModalOpen}
                 onClose={closeDeleteModal}
@@ -706,38 +689,38 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
                 <div ref={materialsRef}>
                     <h4 className="font-semibold text-gray-300">Required Materials (select from inventory)</h4>
                     {materials.map((material, index) => {
-                         const filteredTypes = material ? availableFilmTypes.filter(type => type.toLowerCase().includes(material.toLowerCase())) : [];
-                         return (
-                            <div key={index} className="flex items-center space-x-2 mt-2">
-                                <div className="relative w-full">
-                                    <input value={material}
-                                        onChange={e => handleMaterialChange(index, e.target.value)}
-                                        onFocus={() => setActiveMaterialIndex(index)}
-                                        placeholder="Type to search film..."
-                                        autoComplete="off"
-                                        className="w-full bg-gray-700 p-2 rounded-md" />
-                                    {activeMaterialIndex === index && material && (
-                                        <div className="absolute z-20 w-full mt-1 bg-gray-600 border border-gray-500 rounded-md shadow-lg max-h-40 overflow-y-auto">
-                                            {filteredTypes.length > 0 ? (
-                                                filteredTypes.map(type => (
-                                                    <div key={type}
-                                                        onClick={() => {
-                                                            handleMaterialChange(index, type);
-                                                            setActiveMaterialIndex(null);
-                                                        }}
-                                                        className="p-2 cursor-pointer hover:bg-cyan-600">
-                                                        {type}
-                                                    </div>
-                                                ))
-                                            ) : (
-                                                <div className="p-2 text-gray-400">No matching film types found.</div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                                <button type="button" onClick={() => removeMaterial(index)} className="text-red-500 hover:text-red-400 p-2 rounded-full bg-gray-700"><TrashIcon /></button>
-                            </div>
-                         );
+                          const filteredTypes = material ? availableFilmTypes.filter(type => type.toLowerCase().includes(material.toLowerCase())) : [];
+                          return (
+                              <div key={index} className="flex items-center space-x-2 mt-2">
+                                  <div className="relative w-full">
+                                      <input value={material}
+                                          onChange={e => handleMaterialChange(index, e.target.value)}
+                                          onFocus={() => setActiveMaterialIndex(index)}
+                                          placeholder="Type to search film..."
+                                          autoComplete="off"
+                                          className="w-full bg-gray-700 p-2 rounded-md" />
+                                      {activeMaterialIndex === index && material && (
+                                          <div className="absolute z-20 w-full mt-1 bg-gray-600 border border-gray-500 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                                              {filteredTypes.length > 0 ? (
+                                                  filteredTypes.map(type => (
+                                                      <div key={type}
+                                                          onClick={() => {
+                                                              handleMaterialChange(index, type);
+                                                              setActiveMaterialIndex(null);
+                                                          }}
+                                                          className="p-2 cursor-pointer hover:bg-cyan-600">
+                                                          {type}
+                                                      </div>
+                                                  ))
+                                              ) : (
+                                                  <div className="p-2 text-gray-400">No matching film types found.</div>
+                                              )}
+                                          </div>
+                                      )}
+                                  </div>
+                                  <button type="button" onClick={() => removeMaterial(index)} className="text-red-500 hover:text-red-400 p-2 rounded-full bg-gray-700"><TrashIcon /></button>
+                              </div>
+                           );
                     })}
                     <button type="button" onClick={addMaterial} className="mt-2 text-cyan-400 hover:text-cyan-300 text-sm">+ Add Material</button>
                 </div>
@@ -750,12 +733,12 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
     );
 }
 
-function JobList({ films, jobs, onDelete, onEdit, db, userId }) {
+function JobList({ films, jobs, onDelete, onEdit, db, userId, setView }) {
     if (jobs.length === 0) return <p className="text-center text-gray-500 py-8">No jobs found.</p>;
-    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} />)}</div>;
+    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} jobs={jobs} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} setView={setView} />)}</div>;
 }
 
-function JobCard({ job, films, onDelete, onEdit, db, userId }) {
+function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView }) {
     const [showHistory, setShowHistory] = useState(false);
     const [showStock, setShowStock] = useState(false);
     const [history, setHistory] = useState([]);
@@ -780,24 +763,55 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
         return () => unsubscribe();
     }, [showHistory, db, userId, job.id]);
 
+    const handleRevertToStock = async (historyEntry) => {
+        if (!db || !userId || !historyEntry) return;
 
-    const handleUpdateHistory = async (historyId, newDate) => {
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`, historyId);
+        const batch = writeBatch(db);
+        const filmsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/films`);
+        const newFilmDocRef = doc(filmsCollectionRef);
+        const revertedFilmData = {
+            filmType: historyEntry.filmType,
+            netWeight: historyEntry.netWeight,
+            currentWeight: historyEntry.netWeight,
+            supplier: historyEntry.supplier,
+            purchaseDate: historyEntry.purchaseDate,
+            createdAt: historyEntry.createdAt,
+        };
+        batch.set(newFilmDocRef, revertedFilmData);
+        const historyDocRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+        batch.delete(historyDocRef);
         try {
-            await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+            await batch.commit();
             setEditingHistoryEntry(null);
         } catch (error) {
-            console.error("Error updating history entry:", error);
+            console.error("Error reverting roll to stock from JobCard:", error);
         }
     };
-    
-    const handleDeleteHistory = async (historyId) => {
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`, historyId);
-        try {
-            await deleteDoc(historyRef);
-            setEditingHistoryEntry(null);
-        } catch (error) {
-            console.error("Error deleting history entry:", error);
+
+    const handleUpdateHistory = async (historyEntry, newDate, newJob) => {
+        if (!db || !userId || !historyEntry) return;
+        if (newJob.id === historyEntry.jobId) {
+            const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            try {
+                await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+                setEditingHistoryEntry(null);
+            } catch (error) {
+                console.error("Error updating history date from JobCard:", error);
+            }
+        } else {
+            const batch = writeBatch(db);
+            const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJob.id}/consumedRolls`));
+            const newData = { ...historyEntry, jobId: newJob.id, jobName: newJob.jobName, consumedAt: new Date(newDate + 'T00:00:00Z') };
+            delete newData.id;
+            batch.set(newHistoryRef, newData);
+            batch.delete(oldHistoryRef);
+            try {
+                await batch.commit();
+                setEditingHistoryEntry(null);
+            } catch (error) {
+                console.error("Error moving history entry from JobCard:", error);
+            }
         }
     };
 
@@ -868,12 +882,14 @@ function JobCard({ job, films, onDelete, onEdit, db, userId }) {
                     </div>
                 )}
             </div>
-            <EditHistoryModal 
+            <AdvancedEditHistoryModal 
                 isOpen={!!editingHistoryEntry}
                 onClose={() => setEditingHistoryEntry(null)}
-                onSave={handleUpdateHistory}
-                onDelete={handleDeleteHistory}
                 historyEntry={editingHistoryEntry}
+                jobs={jobs}
+                onUpdate={handleUpdateHistory}
+                onRevert={handleRevertToStock}
+                setView={setView}
             />
         </>
     );
@@ -894,7 +910,7 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
             await addDoc(collection(db, `artifacts/${appId}/users/${userId}/orders`), { 
                 ...orderData, 
                 status: 'active',
-                createdAt: new Date(),
+                createdAt: serverTimestamp(),
                 ownerId: userId 
             });
             setShowForm(false);
@@ -1362,7 +1378,7 @@ function UseStock({ films, jobs, db, userId, setView }) {
                     <div className="border-t border-gray-700 pt-6 space-y-4">
                         <h3 className="text-lg font-medium text-cyan-400">4. Confirm Usage</h3>
                         <div>
-                            <p>Selected Job: <span className="font-bold">{selectedJob.jobName}</span></p>
+                            <p>Selected Job: <span className="font-semibold">{selectedJob.jobName}</span></p>
                             <p>Selected Roll: <span className="font-bold">{selectedRoll.filmType}</span> from <span className="font-bold">{selectedRoll.supplier}</span></p>
                         </div>
                          <div>
@@ -1385,74 +1401,121 @@ function UseStock({ films, jobs, db, userId, setView }) {
 }
 
 // --- GLOBAL FILM HISTORY ---
-function FilmHistory({ db, userId }) {
+function FilmHistory({ db, userId, jobs, setView }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [historySearch, setHistorySearch] = useState('');
     const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
 
     useEffect(() => {
-        if (!db || !userId) {
+        if (!db || !userId || !jobs) {
             setIsLoading(false);
             return;
         }
 
-        const jobsRef = collection(db, `artifacts/${appId}/users/${userId}/jobs`);
-        const unsubscribe = onSnapshot(jobsRef, async (jobsSnapshot) => {
+        const fetchAllHistory = async () => {
             setIsLoading(true);
-            const historyPromises = jobsSnapshot.docs.map(jobDoc => {
-                const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${jobDoc.id}/consumedRolls`;
-                return getDocs(query(collection(db, historyCollectionPath)));
-            });
+            try {
+                if (jobs.length === 0) {
+                    setHistory([]);
+                    setIsLoading(false);
+                    return;
+                }
+                
+                const historyPromises = jobs.map(job => {
+                    const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
+                    return getDocs(query(collection(db, historyCollectionPath)));
+                });
 
-            const allHistorySnapshots = await Promise.all(historyPromises);
+                const allHistorySnapshots = await Promise.all(historyPromises);
 
-            const combinedHistory = [];
-            allHistorySnapshots.forEach(snapshot => {
-                snapshot.docs.forEach(doc => {
-                    combinedHistory.push({ 
-                        id: doc.id,
-                        jobId: doc.ref.parent.parent.id, 
-                        ...doc.data()
+                const combinedHistory = [];
+                allHistorySnapshots.forEach(snapshot => {
+                    snapshot.docs.forEach(doc => {
+                        combinedHistory.push({ 
+                            id: doc.id,
+                            jobId: doc.ref.parent.parent.id, 
+                            ...doc.data() 
+                        });
                     });
                 });
-            });
 
-            combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
-            setHistory(combinedHistory);
-            setIsLoading(false);
-        }, (error) => {
-            console.error("Error fetching jobs for history:", error);
-            setIsLoading(false);
-        });
+                combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
+                
+                setHistory(combinedHistory);
+            } catch (error) {
+                console.error("Error fetching global film history:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
 
-        return () => unsubscribe();
-    }, [db, userId]);
+        fetchAllHistory();
 
-    const handleUpdateHistory = async (historyId, newDate) => {
-        if (!editingHistoryEntry) return;
-        const { jobId } = editingHistoryEntry;
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
+    }, [db, userId, jobs]);
+
+    const handleRevertToStock = async (historyEntry) => {
+        if (!db || !userId || !historyEntry) return;
+
+        const batch = writeBatch(db);
+
+        const filmsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/films`);
+        const newFilmDocRef = doc(filmsCollectionRef, historyEntry.originalId); // Use original ID to revert
+        
+        const revertedFilmData = {
+            filmType: historyEntry.filmType,
+            netWeight: historyEntry.netWeight,
+            currentWeight: historyEntry.netWeight,
+            supplier: historyEntry.supplier,
+            purchaseDate: historyEntry.purchaseDate,
+            createdAt: historyEntry.createdAt,
+        };
+        batch.set(newFilmDocRef, revertedFilmData);
+
+        const historyDocRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+        batch.delete(historyDocRef);
+
         try {
-            await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+            await batch.commit();
+            console.log("Successfully reverted roll to stock.");
             setEditingHistoryEntry(null);
+            setView('stock'); // Navigate to stock page
         } catch (error) {
-            console.error("Error updating history entry:", error);
+            console.error("Error reverting roll to stock:", error);
         }
     };
 
-    const handleDeleteHistory = async (historyId) => {
-        if (!editingHistoryEntry) return;
-        const { jobId } = editingHistoryEntry;
-        const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${jobId}/consumedRolls`, historyId);
-        try {
-            await deleteDoc(historyRef);
-            setEditingHistoryEntry(null);
-        } catch (error) {
-            console.error("Error deleting history entry:", error);
+    const handleUpdateHistory = async (historyEntry, newDate, newJob) => {
+        if (!db || !userId || !historyEntry) return;
+
+        if (newJob.id === historyEntry.jobId) {
+            const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            try {
+                await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') });
+                setEditingHistoryEntry(null);
+            } catch (error) {
+                console.error("Error updating history date:", error);
+            }
+        } else {
+            const batch = writeBatch(db);
+            const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJob.id}/consumedRolls`));
+            
+            const newData = { ...historyEntry, jobId: newJob.id, jobName: newJob.jobName, consumedAt: new Date(newDate + 'T00:00:00Z') };
+            delete newData.id;
+
+            batch.set(newHistoryRef, newData);
+            batch.delete(oldHistoryRef);
+
+            try {
+                await batch.commit();
+                console.log("Successfully moved history entry to new job.");
+                setEditingHistoryEntry(null);
+            } catch (error) {
+                console.error("Error moving history entry:", error);
+            }
         }
     };
-
 
     const filteredHistory = history.filter(item => {
         const searchTerm = historySearch.toLowerCase();
@@ -1492,14 +1555,104 @@ function FilmHistory({ db, userId }) {
                     )) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}
                 </div>
             )}
-            <EditHistoryModal 
+            <AdvancedEditHistoryModal 
                 isOpen={!!editingHistoryEntry}
                 onClose={() => setEditingHistoryEntry(null)}
-                onSave={handleUpdateHistory}
-                onDelete={handleDeleteHistory}
                 historyEntry={editingHistoryEntry}
+                jobs={jobs}
+                onUpdate={handleUpdateHistory}
+                onRevert={handleRevertToStock}
+                setView={setView}
             />
         </section>
+    );
+}
+
+// NEW: Advanced Edit Modal for History
+function AdvancedEditHistoryModal({ isOpen, onClose, historyEntry, jobs, onUpdate, onRevert, setView }) {
+    const [consumedAt, setConsumedAt] = useState('');
+    const [selectedJob, setSelectedJob] = useState(null);
+    const [showRevertConfirm, setShowRevertConfirm] = useState(false);
+
+    useEffect(() => {
+        if (historyEntry) {
+            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
+            const currentJob = jobs.find(j => j.id === historyEntry.jobId);
+            setSelectedJob(currentJob || null);
+            setShowRevertConfirm(false); // Reset on open
+        }
+    }, [historyEntry, jobs]);
+
+    if (!isOpen || !historyEntry) return null;
+
+    const handleUpdate = () => {
+        if (!selectedJob) {
+            alert("Please select a job.");
+            return;
+        }
+        onUpdate(historyEntry, consumedAt, selectedJob);
+    };
+    
+    const handleRevert = () => {
+        onRevert(historyEntry);
+        setView('stock'); // Navigate after reverting
+    }
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
+                <div className="space-y-4">
+                    <p className="text-white bg-gray-700 p-3 rounded-md">Film: <strong className="font-semibold">{historyEntry.filmType}</strong></p>
+                    
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
+                        <input
+                            type="date"
+                            value={consumedAt}
+                            onChange={(e) => setConsumedAt(e.target.value)}
+                            className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Used in Job</label>
+                        <select
+                            value={selectedJob?.id || ''}
+                            onChange={(e) => {
+                                const job = jobs.find(j => j.id === e.target.value);
+                                setSelectedJob(job);
+                            }}
+                            className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"
+                        >
+                            <option value="" disabled>-- Select a Job --</option>
+                            {jobs.map(job => (
+                                <option key={job.id} value={job.id}>{job.jobName}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+                <div className="mt-6 border-t border-gray-700 pt-4">
+                    <h4 className="text-lg font-semibold text-red-400">Danger Zone</h4>
+                    <div className="mt-2 p-3 bg-red-900/20 rounded-lg">
+                        {!showRevertConfirm ? (
+                            <button onClick={() => setShowRevertConfirm(true)} className="w-full text-left text-red-400 hover:text-red-300">Revert to Stock (Delete History Entry)...</button>
+                        ) : (
+                            <div>
+                                <p className="text-white">This will delete the history entry and add the roll back to your main inventory. Are you sure?</p>
+                                <div className="flex gap-4 mt-3">
+                                    <button onClick={handleRevert} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg w-full">Yes, Revert</button>
+                                    <button onClick={() => setShowRevertConfirm(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div className="flex justify-end mt-6 gap-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update Entry</button>
+                </div>
+            </div>
+        </div>
     );
 }
 
