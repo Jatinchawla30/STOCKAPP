@@ -67,6 +67,7 @@ const ChevronLeftIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className
 const SearchIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>);
 const HistoryIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.707-10.293a1 1 0 00-1.414-1.414l-3 3a1 1 0 000 1.414l3 3a1 1 0 001.414-1.414L9.414 11H13a1 1 0 100-2H9.414l1.293-1.293z" clipRule="evenodd" /></svg>);
 const ClipboardListIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>);
+// NEW: Added DownloadIcon
 const DownloadIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>);
 const XIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>);
 const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>);
@@ -234,7 +235,7 @@ function App() {
                 <Header user={user} />
                 <Nav view={view} setView={setView} />
                  <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-                     Logout
+                      Logout
                  </button>
                 <main className="mt-8">
                     {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} />}
@@ -299,7 +300,7 @@ const MarkCompleteModal = ({ isOpen, onClose, onConfirm, order }) => {
 const MessageModal = ({ isOpen, onClose, title, children }) => {
     if (!isOpen) return null;
     return (
-         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+       <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 text-center">
                 <h3 className="text-2xl font-bold text-cyan-400 mb-4">{title}</h3>
                 <div className="text-gray-300 mb-6">{children}</div>
@@ -403,6 +404,40 @@ function FilmInventory({ films, db, userId }) {
         acc[key].push(film);
         return acc;
     }, {});
+    
+    // NEW: PDF Export handler for Film Inventory
+    const handleExportPDF = () => {
+        const doc = new window.jspdf.jsPDF();
+        doc.text("Film Inventory Report", 14, 16);
+        doc.setFontSize(10);
+        doc.text(`Report generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+
+        if (selectedCategory) {
+            // Export detailed list for the selected category
+            const categoryFilms = filmCategories[selectedCategory] || [];
+            doc.text(`Category: ${selectedCategory}`, 14, 30);
+            const head = [['Film Type', 'Current Wt. (kg)', 'Supplier', 'Purchase Date']];
+            const body = categoryFilms.map(film => [
+                film.filmType,
+                film.currentWeight?.toFixed(2),
+                film.supplier,
+                toDDMMYYYY(film.purchaseDate)
+            ]);
+            doc.autoTable({ startY: 35, head, body });
+            
+        } else {
+            // Export summary of all categories
+            const head = [['Category', 'Rolls Count', 'Total Weight (kg)']];
+            const body = Object.keys(filmCategories).sort().map(categoryName => {
+                const rolls = filmCategories[categoryName];
+                const totalWeight = rolls.reduce((sum, roll) => sum + (roll.currentWeight || 0), 0);
+                return [categoryName, rolls.length, totalWeight.toFixed(2)];
+            });
+            doc.autoTable({ startY: 35, head, body });
+        }
+        
+        doc.save(`film-inventory-${selectedCategory || 'summary'}-${toYYYYMMDD(new Date())}.pdf`);
+    };
 
     return (
         <section>
@@ -419,9 +454,15 @@ function FilmInventory({ films, db, userId }) {
                 <h2 className="text-2xl font-semibold text-gray-200">
                     {selectedCategory ? `Category: ${selectedCategory}` : 'Film Stock by Category'}
                 </h2>
-                <button onClick={() => { setEditingFilm(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
-                    <PlusIcon /><span className="ml-2 hidden md:inline">Add New Roll</span>
-                </button>
+                <div className="flex items-center gap-2">
+                    {/* NEW: PDF Download Button */}
+                    <button onClick={handleExportPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
+                        <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
+                    </button>
+                    <button onClick={() => { setEditingFilm(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
+                        <PlusIcon /><span className="ml-2 hidden md:inline">Add New Roll</span>
+                    </button>
+                </div>
             </div>
             
             {showForm && <FilmForm onSubmit={handleFormSubmit} onCancel={closeForm} initialData={editingFilm} />}
@@ -595,6 +636,26 @@ function JobManagement({ films, jobs, orders, db, userId, setView }) {
         }
     };
     
+    // NEW: PDF Export handler for Jobs
+    const handleExportJobsPDF = () => {
+        const doc = new window.jspdf.jsPDF();
+        doc.text("Production Jobs Report", 14, 16);
+        doc.setFontSize(10);
+        doc.text(`Report generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+
+        const head = [['Job Name', 'Size', 'Colours', 'Print Type', 'Materials']];
+        const body = jobs.map(job => [
+            job.jobName,
+            job.jobSize,
+            job.numberOfColors || 'N/A',
+            job.printType ? (job.printType.charAt(0).toUpperCase() + job.printType.slice(1)) : 'N/A',
+            job.materials ? job.materials.join(', ') : 'None'
+        ]);
+
+        doc.autoTable({ startY: 30, head, body });
+        doc.save(`job-management-report-${toYYYYMMDD(new Date())}.pdf`);
+    };
+    
     const filteredJobs = jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs;
 
     return (
@@ -605,12 +666,18 @@ function JobManagement({ films, jobs, orders, db, userId, setView }) {
                     <input type="text" value={jobSearch} onChange={e => setJobSearch(e.target.value)} placeholder="Search jobs..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"/>
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
                 </div>
-                <button onClick={() => { setEditingJob(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
-                    <PlusIcon /><span className="ml-2 hidden md:inline">Add New Job</span>
-                </button>
+                {/* NEW: Added Export button to Job Management */}
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <button onClick={handleExportJobsPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
+                        <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
+                    </button>
+                    <button onClick={() => { setEditingJob(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
+                        <PlusIcon /><span className="ml-2 hidden md:inline">Add New Job</span>
+                    </button>
+                </div>
             </div>
             {showForm && <JobForm films={films} onSubmit={handleJobSubmit} onCancel={() => { setShowForm(false); setEditingJob(null); }} initialData={editingJob} />}
-            <JobList films={films} jobs={jobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} setView={setView} />
+            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} setView={setView} />
             <ConfirmationModal
                 isOpen={isDeleteModalOpen}
                 onClose={closeDeleteModal}
@@ -631,22 +698,32 @@ function JobManagement({ films, jobs, orders, db, userId, setView }) {
     );
 }
 
+// NEW: JobForm updated with numberOfColors and printType
 function JobForm({ onSubmit, onCancel, films, initialData }) {
     const [jobName, setJobName] = useState('');
     const [jobSize, setJobSize] = useState('');
     const [materials, setMaterials] = useState(['']);
     const [activeMaterialIndex, setActiveMaterialIndex] = useState(null);
     const materialsRef = useRef(null);
+    // NEW: State for new fields
+    const [numberOfColors, setNumberOfColors] = useState('');
+    const [printType, setPrintType] = useState('reverse'); // Default to 'reverse'
 
     useEffect(() => {
         if (initialData) {
             setJobName(initialData.jobName || '');
             setJobSize(initialData.jobSize || '');
             setMaterials(initialData.materials && initialData.materials.length > 0 ? initialData.materials : ['']);
+            // NEW: Set state for new fields on edit
+            setNumberOfColors(initialData.numberOfColors || '');
+            setPrintType(initialData.printType || 'reverse');
         } else {
             setJobName('');
             setJobSize('');
             setMaterials(['']);
+            // NEW: Reset state for new fields
+            setNumberOfColors('');
+            setPrintType('reverse');
         }
     }, [initialData]);
 
@@ -677,7 +754,14 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit({ jobName, jobSize, materials: materials.map(m => m.trim()).filter(m => m !== '') });
+        // NEW: Include new fields in the submitted data
+        onSubmit({ 
+            jobName, 
+            jobSize, 
+            materials: materials.map(m => m.trim()).filter(m => m !== ''),
+            numberOfColors: parseInt(numberOfColors, 10) || 0,
+            printType
+        });
     };
 
     return (
@@ -686,6 +770,16 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
             <form onSubmit={handleSubmit} className="space-y-4">
                 <input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job Name" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
                 <input value={jobSize} onChange={e => setJobSize(e.target.value)} placeholder="Job Size (e.g., 100,000 meters)" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                
+                {/* NEW: Input fields for colors and print type */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="number" value={numberOfColors} onChange={e => setNumberOfColors(e.target.value)} placeholder="Number of Colours" className="w-full bg-gray-700 p-2 rounded-md" />
+                    <select value={printType} onChange={e => setPrintType(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md">
+                        <option value="reverse">Reverse Printing</option>
+                        <option value="surface">Surface Printing</option>
+                    </select>
+                </div>
+
                 <div ref={materialsRef}>
                     <h4 className="font-semibold text-gray-300">Required Materials (select from inventory)</h4>
                     {materials.map((material, index) => {
@@ -720,7 +814,7 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
                                   </div>
                                   <button type="button" onClick={() => removeMaterial(index)} className="text-red-500 hover:text-red-400 p-2 rounded-full bg-gray-700"><TrashIcon /></button>
                               </div>
-                           );
+                            );
                     })}
                     <button type="button" onClick={addMaterial} className="mt-2 text-cyan-400 hover:text-cyan-300 text-sm">+ Add Material</button>
                 </div>
@@ -733,11 +827,12 @@ function JobForm({ onSubmit, onCancel, films, initialData }) {
     );
 }
 
-function JobList({ films, jobs, onDelete, onEdit, db, userId, setView }) {
+function JobList({ jobs, onDelete, onEdit, db, userId, setView }) {
     if (jobs.length === 0) return <p className="text-center text-gray-500 py-8">No jobs found.</p>;
-    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} jobs={jobs} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} setView={setView} />)}</div>;
+    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} jobs={jobs} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} setView={setView} />)}</div>;
 }
 
+// NEW: JobCard updated to pass films prop
 function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView }) {
     const [showHistory, setShowHistory] = useState(false);
     const [showStock, setShowStock] = useState(false);
@@ -822,7 +917,12 @@ function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView }) {
                     <div>
                         <h3 className="font-bold text-xl text-gray-100">{job.jobName}</h3>
                         <p className="text-gray-400">{job.jobSize}</p>
-                        <p className="text-xs text-gray-500">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
+                        {/* NEW: Display new job details in the card */}
+                        <div className="text-sm text-gray-400 flex gap-4 mt-1">
+                            {job.numberOfColors && <p>Colours: <span className="font-semibold text-gray-200">{job.numberOfColors}</span></p>}
+                            {job.printType && <p>Print: <span className="font-semibold text-gray-200">{job.printType.charAt(0).toUpperCase() + job.printType.slice(1)}</span></p>}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
                     </div>
                     <div className="flex items-center space-x-3">
                          <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
@@ -895,6 +995,8 @@ function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView }) {
     );
 }
 
+
+// --- ORDER MANAGEMENT COMPONENTS ---
 function OrderManagement({ films, jobs, orders, db, userId }) {
     const [showForm, setShowForm] = useState(false);
     const [viewType, setViewType] = useState('active');
@@ -962,6 +1064,33 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
             closeDeleteModal();
         }
     };
+
+    // NEW: PDF Export handler for Orders
+    const handleExportOrdersPDF = () => {
+        const doc = new window.jspdf.jsPDF();
+        const currentOrders = viewType === 'active' ? activeOrders : completedOrders;
+        const title = viewType === 'active' ? 'Active Orders Report' : 'Completed Orders Report';
+
+        doc.text(title, 14, 16);
+        doc.setFontSize(10);
+        doc.text(`Report generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+
+        const head = [['Order Name', 'Job', 'Colours', 'Print Type', 'Status', 'Date']];
+        const body = currentOrders.map(order => {
+            const job = jobs.find(j => j.id === order.jobId);
+            return [
+                order.orderName,
+                order.jobName,
+                job?.numberOfColors || 'N/A',
+                job?.printType ? (job.printType.charAt(0).toUpperCase() + job.printType.slice(1)) : 'N/A',
+                order.status,
+                order.status === 'completed' ? toDDMMYYYY(order.completedAt) : toDDMMYYYY(order.createdAt)
+            ];
+        });
+
+        doc.autoTable({ startY: 30, head, body });
+        doc.save(`orders-${viewType}-report-${toYYYYMMDD(new Date())}.pdf`);
+    };
     
     const activeOrders = orders.filter(o => o.status === 'active');
     const completedOrders = orders.filter(o => o.status === 'completed')
@@ -977,9 +1106,15 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
                         <button onClick={() => setViewType('completed')} className={`px-4 py-1 rounded-md text-sm font-semibold ${viewType === 'completed' ? 'bg-cyan-600 text-white' : 'text-gray-300'}`}>Completed</button>
                     </div>
                 </div>
-                <button onClick={() => setShowForm(true)} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
-                    <PlusIcon /><span className="ml-2 hidden md:inline">Add New Order</span>
-                </button>
+                {/* NEW: Added Export button to Order Management */}
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <button onClick={handleExportOrdersPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
+                        <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
+                    </button>
+                    <button onClick={() => setShowForm(true)} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
+                        <PlusIcon /><span className="ml-2 hidden md:inline">Add New Order</span>
+                    </button>
+                </div>
             </div>
             {showForm && <OrderForm jobs={jobs} onSubmit={handleOrderSubmit} onCancel={() => setShowForm(false)} />}
             
@@ -1105,6 +1240,7 @@ function OrderList({ orders, jobs, films, onDelete, onComplete, db, userId }) {
     return <div className="space-y-4">{orders.map(order => <OrderCard key={order.id} order={order} jobs={jobs} films={films} onDelete={onDelete} onComplete={onComplete} db={db} userId={userId}/>)}</div>;
 }
 
+// NEW: OrderCard updated to show new job details
 function OrderCard({ order, jobs, films, onDelete, onComplete, db, userId }) {
     const job = useMemo(() => jobs.find(j => j.id === order.jobId), [jobs, order.jobId]);
     const [showHistory, setShowHistory] = useState(false);
@@ -1178,7 +1314,14 @@ function OrderCard({ order, jobs, films, onDelete, onComplete, db, userId }) {
                             <span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span>
                         </button>
                     </div>
-                    <p className="text-sm text-gray-400 mb-2">Job Size: <span className="font-semibold">{job.jobSize || 'N/A'}</span></p>
+
+                    {/* NEW: Displaying new job details in the order card */}
+                    <div className="text-sm text-gray-400 mb-2 flex flex-wrap gap-x-4">
+                        <p>Job Size: <span className="font-semibold text-gray-200">{job.jobSize || 'N/A'}</span></p>
+                        {job.numberOfColors != null && <p>Colours: <span className="font-semibold text-gray-200">{job.numberOfColors}</span></p>}
+                        {job.printType && <p>Print Type: <span className="font-semibold text-gray-200">{job.printType.charAt(0).toUpperCase() + job.printType.slice(1)}</span></p>}
+                    </div>
+
                     <div className="space-y-1">
                         {stockStatus.details.map((detail, i) => (
                              <div key={i} className="flex justify-between items-center text-sm">
@@ -1191,28 +1334,27 @@ function OrderCard({ order, jobs, films, onDelete, onComplete, db, userId }) {
                         ))}
                     </div>
                      {showHistory && (
-                        <div className="mt-4 border-t border-gray-600 pt-3">
-                            <h5 className="font-semibold text-cyan-400 mb-2">Consumed Roll History</h5>
-                            {isLoadingHistory ? <p className="text-sm text-gray-400">Loading history...</p> : (
-                                history.length > 0 ? (
-                                    <ul className="space-y-2 text-sm">
-                                        {history.map(roll => (
-                                            <li key={roll.id} className="p-2 bg-gray-700/50 rounded-md">
-                                                <p className="font-semibold text-gray-200">{roll.filmType}</p>
-                                                <p className="text-gray-400">Consumed: {toDDMMYYYY(roll.consumedAt?.toDate())}</p>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                ) : <p className="text-sm text-gray-400">No rolls consumed for this job yet.</p>
-                            )}
-                        </div>
-                    )}
+                         <div className="mt-4 border-t border-gray-600 pt-3">
+                             <h5 className="font-semibold text-cyan-400 mb-2">Consumed Roll History</h5>
+                             {isLoadingHistory ? <p className="text-sm text-gray-400">Loading history...</p> : (
+                                 history.length > 0 ? (
+                                     <ul className="space-y-2 text-sm">
+                                         {history.map(roll => (
+                                             <li key={roll.id} className="p-2 bg-gray-700/50 rounded-md">
+                                                 <p className="font-semibold text-gray-200">{roll.filmType}</p>
+                                                 <p className="text-gray-400">Consumed: {toDDMMYYYY(roll.consumedAt?.toDate())}</p>
+                                             </li>
+                                         ))}
+                                     </ul>
+                                 ) : <p className="text-sm text-gray-400">No rolls consumed for this job yet.</p>
+                             )}
+                         </div>
+                     )}
                 </div>
             )}
         </div>
     );
 }
-
 
 // --- Use Stock Components ---
 function UseStock({ films, jobs, db, userId, setView }) {
@@ -1248,7 +1390,7 @@ function UseStock({ films, jobs, db, userId, setView }) {
              if (jobFilmTypesInStock.length === 1) {
                 setSelectedFilmType(jobFilmTypesInStock[0]);
              } else {
-                setSelectedFilmType('');
+                 setSelectedFilmType('');
              }
         } else {
             setSelectedFilmType('');
@@ -1422,24 +1564,14 @@ function FilmHistory({ db, userId, jobs, setView }) {
                     return;
                 }
                 
-                const historyPromises = jobs.map(job => {
-                    const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
-                    return getDocs(query(collection(db, historyCollectionPath)));
-                });
+                const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
+                const querySnapshot = await getDocs(q);
 
-                const allHistorySnapshots = await Promise.all(historyPromises);
-
-                const combinedHistory = [];
-                allHistorySnapshots.forEach(snapshot => {
-                    snapshot.docs.forEach(doc => {
-                        combinedHistory.push({ 
-                            id: doc.id,
-                            jobId: doc.ref.parent.parent.id, 
-                            ...doc.data() 
-                        });
-                    });
-                });
-
+                const combinedHistory = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                
                 combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
                 
                 setHistory(combinedHistory);
@@ -1460,7 +1592,7 @@ function FilmHistory({ db, userId, jobs, setView }) {
         const batch = writeBatch(db);
 
         const filmsCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/films`);
-        const newFilmDocRef = doc(filmsCollectionRef, historyEntry.originalId); // Use original ID to revert
+        const newFilmDocRef = doc(filmsCollectionRef, historyEntry.originalId || undefined); // Use original ID to revert
         
         const revertedFilmData = {
             filmType: historyEntry.filmType,
@@ -1516,6 +1648,26 @@ function FilmHistory({ db, userId, jobs, setView }) {
             }
         }
     };
+    
+    // NEW: PDF Export handler for Film History
+    const handleExportHistoryPDF = () => {
+        const doc = new window.jspdf.jsPDF();
+        doc.text("Global Film Usage History Report", 14, 16);
+        doc.setFontSize(10);
+        doc.text(`Report generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+
+        const head = [['Film Type', 'Used in Job', 'Date Used', 'Supplier', 'Original Wt. (kg)']];
+        const body = filteredHistory.map(item => [
+            item.filmType,
+            item.jobName || 'N/A',
+            toDDMMYYYY(item.consumedAt),
+            item.supplier,
+            item.netWeight?.toFixed(2)
+        ]);
+
+        doc.autoTable({ startY: 30, head, body });
+        doc.save(`film-history-report-${toYYYYMMDD(new Date())}.pdf`);
+    };
 
     const filteredHistory = history.filter(item => {
         const searchTerm = historySearch.toLowerCase();
@@ -1528,7 +1680,7 @@ function FilmHistory({ db, userId, jobs, setView }) {
         <section>
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
                 <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
-                <div className="relative w-full md:w-full">
+                <div className="relative w-full md:w-1/2">
                     <input
                         type="text"
                         value={historySearch}
@@ -1538,12 +1690,16 @@ function FilmHistory({ db, userId, jobs, setView }) {
                     />
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
                 </div>
+                 {/* NEW: PDF Export button for History */}
+                <button onClick={handleExportHistoryPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
+                    <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
+                </button>
             </div>
 
             {isLoading ? <p>Loading history...</p> : (
                 <div className="space-y-3">
                     {filteredHistory.length > 0 ? filteredHistory.map(item => (
-                        <div key={item.id} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center">
+                        <div key={item.id + item.jobId} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center">
                             <div>
                                 <p className="font-bold text-lg text-cyan-400">{item.filmType}</p>
                                 <p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p>
@@ -1595,7 +1751,7 @@ function AdvancedEditHistoryModal({ isOpen, onClose, historyEntry, jobs, onUpdat
     
     const handleRevert = () => {
         onRevert(historyEntry);
-        setView('stock'); // Navigate after reverting
+        // No need to call setView here, as the calling component does it.
     }
 
     return (
