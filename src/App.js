@@ -3,38 +3,12 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setLogLevel, serverTimestamp } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
-// --- PDF Library & Export Helper ---
-// Scripts are added to the head to enable PDF generation.
-const jspdfScript = document.createElement('script');
-jspdfScript.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-document.head.appendChild(jspdfScript);
-
-const jspdfAutotableScript = document.createElement('script');
-jspdfAutotableScript.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js";
-document.head.appendChild(jspdfAutotableScript);
-
-// FINAL FIX: This is a more robust, centralized PDF export function.
-// It checks if the libraries are loaded and sanitizes data to prevent errors.
+// FINAL FIX: This is a robust, centralized PDF export function.
+// It assumes the libraries are loaded (managed by App's state) and sanitizes data.
 const exportToPDF = (title, head, body, fileName) => {
-    // 1. Check if the main jsPDF library is available on the window object.
-    if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') {
-        alert("PDF library is not yet loaded. Please wait a moment and try again.");
-        console.error("jsPDF script has not loaded.");
-        return;
-    }
-
     try {
         const doc = new window.jspdf.jsPDF();
-
-        // 2. Check if the autoTable plugin has attached itself to the jsPDF instance.
-        // This is the most reliable way to see if the plugin is ready.
-        if (typeof doc.autoTable !== 'function') {
-            alert("PDF table plugin is not yet loaded. Please wait a moment and try again.");
-            console.error("jsPDF.autoTable is not a function. The autotable plugin might not have loaded.");
-            return;
-        }
-
-        // 3. Sanitize the body data to ensure every cell is a string, preventing library errors.
+        // Sanitize the body data to ensure every cell is a string, preventing library errors.
         const sanitizedBody = body.map(row => 
             row.map(cell => String(cell === null || cell === undefined ? 'N/A' : cell))
         );
@@ -177,6 +151,54 @@ function App() {
     const [jobs, setJobs] = useState([]);
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    // FINAL FIX: State to track if PDF libraries are loaded and ready.
+    const [isPdfReady, setIsPdfReady] = useState(false);
+
+    // FINAL FIX: Effect to reliably load PDF scripts sequentially.
+    useEffect(() => {
+        const jspdfScriptId = 'jspdf-script';
+        const autoTableScriptId = 'jspdf-autotable-script';
+
+        // If scripts already exist, don't re-add them.
+        if (document.getElementById(jspdfScriptId) && document.getElementById(autoTableScriptId)) {
+            setIsPdfReady(true);
+            return;
+        }
+
+        const script1 = document.createElement('script');
+        script1.id = jspdfScriptId;
+        script1.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+        script1.async = true;
+
+        const script2 = document.createElement('script');
+        script2.id = autoTableScriptId;
+        script2.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js";
+        script2.async = true;
+
+        // Chain the loading: load autotable only after jspdf is loaded.
+        script1.onload = () => {
+            console.log("jsPDF script loaded.");
+            document.head.appendChild(script2);
+        };
+
+        // Set ready state only after the final script (autotable) is loaded.
+        script2.onload = () => {
+            console.log("jsPDF AutoTable plugin loaded.");
+            setIsPdfReady(true);
+        };
+
+        // Start the loading chain.
+        document.head.appendChild(script1);
+
+        // Cleanup function to remove scripts if the component unmounts.
+        return () => {
+            const s1 = document.getElementById(jspdfScriptId);
+            const s2 = document.getElementById(autoTableScriptId);
+            if (s1) s1.remove();
+            if (s2) s2.remove();
+        };
+    }, []);
+
 
     // Effect for initializing Firebase and handling authentication
     useEffect(() => {
@@ -259,11 +281,12 @@ function App() {
                 <Nav view={view} setView={setView} />
                  <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Logout</button>
                 <main className="mt-8">
-                    {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} />}
-                    {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} />}
-                    {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} />}
+                    {/* FINAL FIX: Pass isPdfReady prop down to components that need it. */}
+                    {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
+                    {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} isPdfReady={isPdfReady} />}
+                    {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
                     {view === 'use_stock' && <UseStock films={films} jobs={jobs} db={db} userId={user.uid} setView={setView} />}
-                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} setView={setView} />}
+                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} setView={setView} isPdfReady={isPdfReady} />}
                 </main>
             </div>
         </div>
@@ -345,7 +368,8 @@ const NavButton = ({ text, isActive, onClick }) => (
 );
 
 // --- FILM INVENTORY COMPONENTS ---
-function FilmInventory({ films, db, userId }) {
+// FINAL FIX: Accept isPdfReady prop
+function FilmInventory({ films, db, userId, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingFilm, setEditingFilm] = useState(null);
     const [selectedCategory, setSelectedCategory] = useState(null);
@@ -414,7 +438,13 @@ function FilmInventory({ films, db, userId }) {
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-semibold text-gray-200">{selectedCategory ? `Category: ${selectedCategory}` : 'Film Stock by Category'}</h2>
                 <div className="flex items-center gap-2">
-                    <button onClick={handleExportPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
+                    {/* FINAL FIX: Disable button based on isPdfReady prop */}
+                    <button 
+                        onClick={handleExportPDF} 
+                        disabled={!isPdfReady}
+                        className={`flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 hover:scale-105 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title={!isPdfReady ? "PDF exporter is loading..." : "Export current view to PDF"}
+                    >
                         <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
                     </button>
                     <button onClick={() => { setEditingFilm(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
@@ -517,7 +547,7 @@ function FilmList({ films, onEdit, onDelete }) {
 }
 
 // --- JOB MANAGEMENT COMPONENTS ---
-function JobManagement({ films, jobs, orders, db, userId, setView }) {
+function JobManagement({ films, jobs, orders, db, userId, setView, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingJob, setEditingJob] = useState(null);
     const [jobSearch, setJobSearch] = useState('');
@@ -558,13 +588,12 @@ function JobManagement({ films, jobs, orders, db, userId, setView }) {
         if (!jobToDelete || !db || !userId) return;
         const jobRef = doc(db, `artifacts/${appId}/users/${userId}/jobs`, jobToDelete.id);
         try {
-            // Firestore doesn't support deleting subcollections directly from the client.
-            // A better approach is a Cloud Function, but for now we will delete the job doc only.
-            // The history will be orphaned but won't affect the app's functionality.
             await deleteDoc(jobRef);
         } catch (error) { console.error("Error deleting job:", error); }
         finally { closeDeleteModal(); }
     };
+    
+    const filteredJobs = useMemo(() => jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs, [jobs, jobSearch]);
     
     const handleExportJobsPDF = () => {
         const title = "Production Jobs Report";
@@ -577,8 +606,6 @@ function JobManagement({ films, jobs, orders, db, userId, setView }) {
         const fileName = `job-management-report-${toYYYYMMDD(new Date())}.pdf`;
         exportToPDF(title, head, body, fileName);
     };
-    
-    const filteredJobs = useMemo(() => jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs, [jobs, jobSearch]);
 
     return (
         <section>
@@ -589,7 +616,12 @@ function JobManagement({ films, jobs, orders, db, userId, setView }) {
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
                 </div>
                 <div className="flex items-center gap-2 w-full md:w-auto">
-                    <button onClick={handleExportJobsPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
+                    <button 
+                        onClick={handleExportJobsPDF} 
+                        disabled={!isPdfReady}
+                        className={`flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 hover:scale-105 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title={!isPdfReady ? "PDF exporter is loading..." : "Export jobs to PDF"}
+                    >
                         <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
                     </button>
                     <button onClick={() => { setEditingJob(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
@@ -800,7 +832,7 @@ function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView }) {
 
 
 // --- ORDER MANAGEMENT COMPONENTS ---
-function OrderManagement({ films, jobs, orders, db, userId }) {
+function OrderManagement({ films, jobs, orders, db, userId, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [viewType, setViewType] = useState('active');
     const [completedSearch, setCompletedSearch] = useState('');
@@ -838,6 +870,9 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
         catch (error) { console.error("Error deleting order: ", error); }
         finally { closeDeleteModal(); }
     };
+    
+    const activeOrders = useMemo(() => orders.filter(o => o.status === 'active'), [orders]);
+    const completedOrders = useMemo(() => orders.filter(o => o.status === 'completed' && o.orderName.toLowerCase().includes(completedSearch.toLowerCase())), [orders, completedSearch]);
 
     const handleExportOrdersPDF = () => {
         const currentOrders = viewType === 'active' ? activeOrders : completedOrders;
@@ -850,9 +885,6 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
         const fileName = `orders-${viewType}-report-${toYYYYMMDD(new Date())}.pdf`;
         exportToPDF(title, head, body, fileName);
     };
-    
-    const activeOrders = useMemo(() => orders.filter(o => o.status === 'active'), [orders]);
-    const completedOrders = useMemo(() => orders.filter(o => o.status === 'completed' && o.orderName.toLowerCase().includes(completedSearch.toLowerCase())), [orders, completedSearch]);
 
     return (
         <section>
@@ -865,7 +897,12 @@ function OrderManagement({ films, jobs, orders, db, userId }) {
                     </div>
                 </div>
                 <div className="flex items-center gap-2 w-full md:w-auto">
-                    <button onClick={handleExportOrdersPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105">
+                    <button 
+                        onClick={handleExportOrdersPDF} 
+                        disabled={!isPdfReady}
+                        className={`flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 hover:scale-105 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title={!isPdfReady ? "PDF exporter is loading..." : "Export orders to PDF"}
+                    >
                         <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
                     </button>
                     <button onClick={() => setShowForm(true)} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
@@ -1135,7 +1172,7 @@ function UseStock({ films, jobs, db, userId, setView }) {
 }
 
 // --- GLOBAL FILM HISTORY ---
-function FilmHistory({ db, userId, jobs, setView }) {
+function FilmHistory({ db, userId, jobs, setView, isPdfReady }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [historySearch, setHistorySearch] = useState('');
@@ -1191,6 +1228,11 @@ function FilmHistory({ db, userId, jobs, setView }) {
         }
     };
 
+    const filteredHistory = useMemo(() => history.filter(item => {
+        const searchTerm = historySearch.toLowerCase();
+        return item.filmType?.toLowerCase().includes(searchTerm) || item.jobName?.toLowerCase().includes(searchTerm);
+    }), [history, historySearch]);
+
     const handleExportHistoryPDF = () => {
         const title = "Global Film Usage History Report";
         const head = [['Film Type', 'Used in Job', 'Date Used', 'Supplier', 'Original Wt. (kg)']];
@@ -1199,17 +1241,19 @@ function FilmHistory({ db, userId, jobs, setView }) {
         exportToPDF(title, head, body, fileName);
     };
 
-    const filteredHistory = useMemo(() => history.filter(item => {
-        const searchTerm = historySearch.toLowerCase();
-        return item.filmType?.toLowerCase().includes(searchTerm) || item.jobName?.toLowerCase().includes(searchTerm);
-    }), [history, historySearch]);
-
     return(
         <section>
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
                 <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
                 <div className="relative w-full md:w-1/2"><input type="text" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search by film or job name..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" /><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div></div>
-                <button onClick={handleExportHistoryPDF} className="flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto"><DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span></button>
+                <button 
+                    onClick={handleExportHistoryPDF} 
+                    disabled={!isPdfReady}
+                    className={`flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 hover:scale-105 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={!isPdfReady ? "PDF exporter is loading..." : "Export history to PDF"}
+                >
+                    <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
+                </button>
             </div>
             {isLoading ? <p>Loading history...</p> : (<div className="space-y-3">{filteredHistory.length > 0 ? filteredHistory.map(item => (<div key={item.id + item.jobId} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center"><div><p className="font-bold text-lg text-cyan-400">{item.filmType}</p><p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p><p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt)}</p><p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p></div><button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button></div>)) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}</div>)}
             <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} />
