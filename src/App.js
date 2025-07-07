@@ -7,7 +7,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from
 const exportToPDF = (title, head, body, fileName) => {
     try {
         const doc = new window.jspdf.jsPDF();
-        const sanitizedBody = body.map(row => 
+        const sanitizedBody = body.map(row =>
             row.map(cell => String(cell === null || cell === undefined ? 'N/A' : cell))
         );
         doc.text(title, 14, 16);
@@ -80,7 +80,7 @@ const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className
 const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-cyan-400 mb-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>);
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 
-// NEW: Reusable helper function to calculate stock status for a job.
+// Reusable helper function to calculate stock status for a job.
 const calculateStockStatus = (job, films) => {
     if (!job || !job.materials || job.materials.length === 0) {
         return { ready: true, details: [] };
@@ -238,12 +238,172 @@ function App() {
     );
 }
 
+// --- Login Screen Component ---
+function LoginScreen({ auth }) {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleLogin = async (e) => {
+        e.preventDefault();
+        setError('');
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+        } catch (error) {
+            if (error.code === 'auth/api-key-not-valid') {
+                setError('Login failed: Invalid API Key. Please ensure your Firebase config is correct and check for API key restrictions in your Google Cloud Console.');
+            } else if (error.code === 'auth/operation-not-allowed') {
+                setError(`Login failed: Email/Password sign-in is not enabled for project ${firebaseConfig.projectId}. Please double-check the setting in your Firebase console.`);
+            } else {
+                setError('Failed to log in. Please check your email and password.');
+            }
+            console.error("Login Error:", error);
+        }
+    };
+
+    return (
+        <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
+            <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
+                <div className="flex flex-col items-center">
+                    <LockClosedIcon />
+                    <h1 className="text-3xl font-bold text-cyan-400 mb-2">Login</h1>
+                    <p className="text-gray-400 mb-6">Please enter your credentials</p>
+                </div>
+                <form onSubmit={handleLogin} className="space-y-6">
+                    <div>
+                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" autoComplete="email"
+                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                    </div>
+                    <div>
+                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password"
+                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                    </div>
+                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                    <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-md transition-transform duration-200 hover:scale-105">
+                        Login
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+}
+
 // --- MODAL AND HEADER COMPONENTS ---
-// ... (Modal and Header components remain unchanged)
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, children }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 text-center">
+                <div className="flex justify-center mb-4"><ExclamationIcon /></div>
+                <h3 className="text-2xl font-bold text-white mb-2">{title}</h3>
+                <div className="text-gray-300 mb-6">{children}</div>
+                <div className="flex justify-center gap-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">Cancel</button>
+                    <button onClick={onConfirm} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">Confirm Delete</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const MarkCompleteModal = ({ isOpen, onClose, onConfirm, order }) => {
+    const [completionDate, setCompletionDate] = useState(toYYYYMMDD(new Date()));
+    if (!isOpen) return null;
+    const handleConfirm = () => onConfirm(order.id, new Date(completionDate + 'T00:00:00Z'));
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Complete Order</h3>
+                <p className="text-gray-300 mb-4">Select a completion date for order <strong className="text-white">{order?.orderName}</strong>.</p>
+                <input type="date" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none mb-6" />
+                <div className="flex justify-end gap-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button onClick={handleConfirm} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Confirm Completion</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const MessageModal = ({ isOpen, onClose, title, children }) => {
+    if (!isOpen) return null;
+    return (
+       <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4 text-center">
+                <h3 className="text-2xl font-bold text-cyan-400 mb-4">{title}</h3>
+                <div className="text-gray-300 mb-6">{children}</div>
+                <button onClick={onClose} className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">OK</button>
+            </div>
+        </div>
+    );
+}
+
+const Header = ({ user }) => (
+    <header className="mb-8 text-center md:text-left">
+        <h2 className="text-2xl font-semibold text-gray-300">SHRI GURUNANAK INDUSTRIES</h2>
+        <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
+        {user && (<div className="mt-2 text-xs text-yellow-300"><p>Logged in as: {user.email || user.uid}</p></div>)}
+        <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
+    </header>
+);
+
+const Nav = ({ view, setView }) => (
+    <nav className="flex flex-wrap space-x-2 md:space-x-4 border-b border-gray-700 pb-2">
+        <NavButton text="Stock Inventory" isActive={view === 'stock'} onClick={() => setView('stock')} />
+        <NavButton text="Job Management" isActive={view === 'jobs'} onClick={() => setView('jobs')} />
+        <NavButton text="Orders" isActive={view === 'orders'} onClick={() => setView('orders')} />
+        <NavButton text="Use Stock" isActive={view === 'use_stock'} onClick={() => setView('use_stock')} />
+        <NavButton text="Film History" isActive={view === 'film_history'} onClick={() => setView('film_history')} />
+    </nav>
+);
+
+const NavButton = ({ text, isActive, onClick }) => (
+    <button onClick={onClick} className={`px-3 py-2 rounded-t-lg text-sm md:text-base font-semibold transition-colors duration-200 focus:outline-none ${isActive ? 'bg-gray-800 text-cyan-400 border-b-2 border-cyan-400' : 'text-gray-400 hover:bg-gray-800'}`}>{text}</button>
+);
 
 // --- FILM INVENTORY COMPONENTS ---
 function FilmInventory({ films, db, userId, isPdfReady }) {
-    // ... (Component logic remains unchanged)
+    const [showForm, setShowForm] = useState(false);
+    const [editingFilm, setEditingFilm] = useState(null);
+    const [selectedCategory, setSelectedCategory] = useState(null);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [filmToDelete, setFilmToDelete] = useState(null);
+
+    const handleFormSubmit = async (filmData) => {
+        if (!db || !userId) return;
+        const filmsCollectionPath = `artifacts/${appId}/users/${userId}/films`;
+        const dataToSave = { ...filmData, purchaseDate: new Date(filmData.purchaseDate + 'T00:00:00Z') };
+        try {
+            if (editingFilm) {
+                await updateDoc(doc(db, filmsCollectionPath, editingFilm.id), dataToSave);
+                setEditingFilm(null);
+            } else {
+                await addDoc(collection(db, filmsCollectionPath), { ...dataToSave, currentWeight: dataToSave.netWeight, createdAt: serverTimestamp() });
+            }
+            setShowForm(false);
+        } catch (error) { console.error("Error saving film:", error); }
+    };
+
+    const openDeleteModal = (film) => { setFilmToDelete(film); setIsDeleteModalOpen(true); };
+    const closeDeleteModal = () => { setFilmToDelete(null); setIsDeleteModalOpen(false); };
+    const handleEdit = (film) => { setEditingFilm(film); setShowForm(true); };
+    const closeForm = () => { setShowForm(false); setEditingFilm(null); };
+
+    const executeDelete = async () => {
+        if (!db || !userId || !filmToDelete) return;
+        try {
+            await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/films`, filmToDelete.id));
+        } catch (error) { console.error("Error deleting film:", error); }
+        finally { closeDeleteModal(); }
+    };
+
+    const filmCategories = useMemo(() => films.reduce((acc, film) => {
+        const key = film.filmType || 'Uncategorized';
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(film);
+        return acc;
+    }, {}), [films]);
     
     const handleExportPDF = () => {
         let head, body, fileName;
@@ -266,7 +426,9 @@ function FilmInventory({ films, db, userId, isPdfReady }) {
 
     return (
         <section>
-            {/* ... ConfirmationModal ... */}
+            <ConfirmationModal isOpen={isDeleteModalOpen} onClose={closeDeleteModal} onConfirm={executeDelete} title="Delete Film Roll?">
+              <p>Are you sure you want to delete this <strong className="text-white">{filmToDelete?.filmType}</strong> roll? This action cannot be undone.</p>
+            </ConfirmationModal>
             <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-semibold text-gray-200">{selectedCategory ? `Category: ${selectedCategory}` : 'Film Stock by Category'}</h2>
                 <div className="flex items-center gap-2">
@@ -284,16 +446,145 @@ function FilmInventory({ films, db, userId, isPdfReady }) {
                 </div>
             </div>
             
-            {/* ... Rest of the component ... */}
+            {showForm && <FilmForm onSubmit={handleFormSubmit} onCancel={closeForm} initialData={editingFilm} />}
+            
+            {selectedCategory ? (
+                <div>
+                    <button onClick={() => setSelectedCategory(null)} className="flex items-center mb-4 text-cyan-400 hover:text-cyan-300"><ChevronLeftIcon /> Back to Categories</button>
+                    <FilmList films={filmCategories[selectedCategory] || []} onEdit={handleEdit} onDelete={openDeleteModal} />
+                </div>
+            ) : (<CategoryList categories={filmCategories} onSelectCategory={setSelectedCategory} />)}
         </section>
     );
 }
-// ... (FilmForm, CategoryList, FilmList components remain unchanged)
 
+function FilmForm({ onSubmit, onCancel, initialData }) {
+    const [formData, setFormData] = useState({ filmType: '', netWeight: '', supplier: '', purchaseDate: toYYYYMMDD(new Date()) });
+
+    useEffect(() => {
+        if (initialData) {
+            setFormData({
+                filmType: initialData.filmType || '',
+                netWeight: initialData.netWeight || '',
+                supplier: initialData.supplier || '',
+                purchaseDate: toYYYYMMDD(initialData.purchaseDate),
+            });
+        } else {
+            setFormData({ filmType: '', netWeight: '', supplier: '', purchaseDate: toYYYYMMDD(new Date()) });
+        }
+    }, [initialData]);
+
+    const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSubmit({ ...formData, netWeight: parseFloat(formData.netWeight) || 0, filmType: formData.filmType.trim() });
+    };
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg mb-8 shadow-lg">
+            <h3 className="text-xl font-semibold mb-4 text-cyan-400">{initialData ? 'Edit Film Roll' : 'Add New Film Roll'}</h3>
+            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input name="filmType" value={formData.filmType} onChange={handleChange} placeholder="Film Type (e.g., 12*610 PET)" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <input name="netWeight" type="number" step="0.01" value={formData.netWeight} onChange={handleChange} placeholder="Net Weight (kg)" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <input name="supplier" value={formData.supplier} onChange={handleChange} placeholder="Supplier" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <input name="purchaseDate" type="date" value={formData.purchaseDate} onChange={handleChange} required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <div className="flex items-center space-x-4 md:col-span-2">
+                    <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">{initialData ? 'Update Roll' : 'Add Roll'}</button>
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">Cancel</button>
+                </div>
+            </form>
+        </div>
+    );
+}
+
+function CategoryList({ categories, onSelectCategory }) {
+    const sortedCategories = Object.keys(categories).sort();
+    if (sortedCategories.length === 0) return <p className="text-center text-gray-500 py-8">No film rolls in stock. Add one to get started!</p>;
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sortedCategories.map(categoryName => {
+                const rolls = categories[categoryName];
+                const totalWeight = rolls.reduce((sum, roll) => sum + (roll.currentWeight || 0), 0);
+                return (
+                    <div key={categoryName} onClick={() => onSelectCategory(categoryName)} className="bg-gray-800 p-4 rounded-lg cursor-pointer hover:bg-gray-700 hover:shadow-cyan-500/10 shadow-lg transition-all">
+                        <h3 className="text-xl font-bold text-cyan-400">{categoryName}</h3>
+                        <p className="text-gray-300">{rolls.length} Roll(s)</p>
+                        <p className="text-gray-400 text-sm mt-2">Total Weight: {totalWeight.toFixed(2)} kg</p>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function FilmList({ films, onEdit, onDelete }) {
+    return (
+        <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-md">
+            <table className="w-full text-left">
+                <thead className="bg-gray-700"><tr><th className="p-3">Film Type</th><th className="p-3">Current Wt. (kg)</th><th className="p-3">Supplier</th><th className="p-3">Purchase Date</th><th className="p-3">Actions</th></tr></thead>
+                <tbody>
+                    {films.map(film => (
+                        <tr key={film.id} className="border-b border-gray-700 hover:bg-gray-700/50">
+                            <td className="p-3 font-medium">{film.filmType}</td><td className="p-3">{film.currentWeight?.toFixed(2)}</td>
+                            <td className="p-3">{film.supplier}</td><td className="p-3">{toDDMMYYYY(film.purchaseDate)}</td>
+                            <td className="p-3 flex space-x-2">
+                                <button onClick={() => onEdit(film)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                                <button onClick={() => onDelete(film)} className="text-red-500 hover:text-red-400"><TrashIcon /></button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
 
 // --- JOB MANAGEMENT COMPONENTS ---
 function JobManagement({ films, jobs, orders, db, userId, setView, isPdfReady }) {
-    // ... (Component logic remains unchanged)
+    const [showForm, setShowForm] = useState(false);
+    const [editingJob, setEditingJob] = useState(null);
+    const [jobSearch, setJobSearch] = useState('');
+    const [isDeleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [jobToDelete, setJobToDelete] = useState(null);
+    const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+    const [messageModalContent, setMessageModalContent] = useState({title: '', body: ''});
+
+    const handleJobSubmit = async (jobData) => {
+        if (!db || !userId) return;
+        const jobsCollectionPath = `artifacts/${appId}/users/${userId}/jobs`;
+        try {
+             if (editingJob) {
+                await updateDoc(doc(db, jobsCollectionPath, editingJob.id), jobData);
+                setEditingJob(null);
+            } else {
+                await addDoc(collection(db, jobsCollectionPath), { ...jobData, createdAt: serverTimestamp() });
+            }
+            setShowForm(false);
+        } catch (error) { console.error("Error saving job:", error); }
+    };
+
+    const handleEditJob = (job) => { setEditingJob(job); setShowForm(true); };
+    const closeDeleteModal = () => { setJobToDelete(null); setDeleteModalOpen(false); };
+
+    const openDeleteModal = (job) => {
+        const isJobInActiveOrder = orders.some(order => order.jobId === job.id && order.status === 'active');
+        if (isJobInActiveOrder) {
+            setMessageModalContent({ title: 'Deletion Prevented', body: 'This job is linked to an active order. Please complete or delete the order first.' });
+            setIsMessageModalOpen(true);
+        } else {
+            setJobToDelete(job);
+            setDeleteModalOpen(true);
+        }
+    };
+
+    const executeDeleteJob = async () => {
+        if (!jobToDelete || !db || !userId) return;
+        const jobRef = doc(db, `artifacts/${appId}/users/${userId}/jobs`, jobToDelete.id);
+        try {
+            await deleteDoc(jobRef);
+        } catch (error) { console.error("Error deleting job:", error); }
+        finally { closeDeleteModal(); }
+    };
     
     const filteredJobs = useMemo(() => jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs, [jobs, jobSearch]);
     
@@ -326,14 +617,211 @@ function JobManagement({ films, jobs, orders, db, userId, setView, isPdfReady })
                     >
                         <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
                     </button>
-                    {/* ... Add New Job button ... */}
+                    <button onClick={() => { setEditingJob(null); setShowForm(true); }} className="flex items-center bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 hover:scale-105 w-full md:w-auto">
+                        <PlusIcon /><span className="ml-2 hidden md:inline">Add New Job</span>
+                    </button>
                 </div>
             </div>
-            {/* ... Rest of the component ... */}
+            {showForm && <JobForm films={films} onSubmit={handleJobSubmit} onCancel={() => { setShowForm(false); setEditingJob(null); }} initialData={editingJob} />}
+            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} setView={setView} />
+            <ConfirmationModal isOpen={isDeleteModalOpen} onClose={closeDeleteModal} onConfirm={executeDeleteJob} title="Delete Job?">
+                <p>Are you sure you want to delete the job <strong className="text-white">{jobToDelete?.jobName}</strong>? Its consumption history will be orphaned but will remain. This action cannot be undone.</p>
+            </ConfirmationModal>
+            <MessageModal isOpen={isMessageModalOpen} onClose={() => setIsMessageModalOpen(false)} title={messageModalContent.title}>{messageModalContent.body}</MessageModal>
         </section>
     );
 }
-// ... (JobForm, JobList, JobCard components remain unchanged)
+
+function JobForm({ onSubmit, onCancel, films, initialData }) {
+    const [jobName, setJobName] = useState('');
+    const [jobSize, setJobSize] = useState('');
+    const [materials, setMaterials] = useState(['']);
+    const [activeMaterialIndex, setActiveMaterialIndex] = useState(null);
+    const materialsRef = useRef(null);
+    const [numberOfColors, setNumberOfColors] = useState('');
+    const [printType, setPrintType] = useState('reverse');
+
+    useEffect(() => {
+        if (initialData) {
+            setJobName(initialData.jobName || '');
+            setJobSize(initialData.jobSize || '');
+            setMaterials(initialData.materials && initialData.materials.length > 0 ? initialData.materials : ['']);
+            setNumberOfColors(initialData.numberOfColors || '');
+            setPrintType(initialData.printType || 'reverse');
+        } else {
+            setJobName(''); setJobSize(''); setMaterials(['']); setNumberOfColors(''); setPrintType('reverse');
+        }
+    }, [initialData]);
+
+    useEffect(() => {
+        function handleClickOutside(event) {
+            if (materialsRef.current && !materialsRef.current.contains(event.target)) { setActiveMaterialIndex(null); }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [materialsRef]);
+
+    const availableFilmTypes = useMemo(() => {
+        if (!films) return [];
+        return [...new Set(films.map(f => f.filmType.trim()).filter(Boolean))].sort();
+    }, [films]);
+        
+    const addMaterial = () => setMaterials([...materials, '']);
+    const handleMaterialChange = (index, value) => { const newMaterials = [...materials]; newMaterials[index] = value; setMaterials(newMaterials); };
+    const removeMaterial = (index) => setMaterials(materials.filter((_, i) => i !== index));
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSubmit({ jobName, jobSize, materials: materials.map(m => m.trim()).filter(Boolean), numberOfColors: parseInt(numberOfColors, 10) || 0, printType });
+    };
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg mb-8 shadow-lg">
+            <h3 className="text-xl font-semibold mb-4 text-cyan-400">{initialData ? 'Edit Job' : 'Add New Job'}</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <input value={jobName} onChange={e => setJobName(e.target.value)} placeholder="Job Name" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <input value={jobSize} onChange={e => setJobSize(e.target.value)} placeholder="Job Size (e.g., 100,000 meters)" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="number" value={numberOfColors} onChange={e => setNumberOfColors(e.target.value)} placeholder="Number of Colours" className="w-full bg-gray-700 p-2 rounded-md" />
+                    <select value={printType} onChange={e => setPrintType(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md"><option value="reverse">Reverse Printing</option><option value="surface">Surface Printing</option></select>
+                </div>
+                <div ref={materialsRef}>
+                    <h4 className="font-semibold text-gray-300">Required Materials</h4>
+                    {materials.map((material, index) => (
+                        <div key={index} className="flex items-center space-x-2 mt-2">
+                            <div className="relative w-full">
+                                <input value={material} onChange={e => handleMaterialChange(index, e.target.value)} onFocus={() => setActiveMaterialIndex(index)} placeholder="Type to search film..." autoComplete="off" className="w-full bg-gray-700 p-2 rounded-md" />
+                                {activeMaterialIndex === index && material && (
+                                    <div className="absolute z-20 w-full mt-1 bg-gray-600 border border-gray-500 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                                        {availableFilmTypes.filter(type => type.toLowerCase().includes(material.toLowerCase())).length > 0 
+                                            ? availableFilmTypes.filter(type => type.toLowerCase().includes(material.toLowerCase())).map(type => (<div key={type} onClick={() => { handleMaterialChange(index, type); setActiveMaterialIndex(null); }} className="p-2 cursor-pointer hover:bg-cyan-600">{type}</div>)) 
+                                            : <div className="p-2 text-gray-400">No matching film types found.</div>}
+                                    </div>
+                                )}
+                            </div>
+                            <button type="button" onClick={() => removeMaterial(index)} className="text-red-500 hover:text-red-400 p-2 rounded-full bg-gray-700"><TrashIcon /></button>
+                        </div>
+                    ))}
+                    <button type="button" onClick={addMaterial} className="mt-2 text-cyan-400 hover:text-cyan-300 text-sm">+ Add Material</button>
+                </div>
+                <div className="flex items-center space-x-4 pt-2">
+                    <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full">{initialData ? 'Update Job' : 'Create Job'}</button>
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
+                </div>
+            </form>
+        </div>
+    );
+}
+
+function JobList({ films, jobs, onDelete, onEdit, db, userId, setView }) {
+    if (jobs.length === 0) return <p className="text-center text-gray-500 py-8">No jobs found.</p>;
+    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} jobs={jobs} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} setView={setView} />)}</div>;
+}
+
+function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView }) {
+    const [showHistory, setShowHistory] = useState(false);
+    const [showStock, setShowStock] = useState(false);
+    const [history, setHistory] = useState([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
+
+    useEffect(() => {
+        if (!showHistory || !db || !userId) return;
+        setIsLoadingHistory(true);
+        const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
+        const q = query(collection(db, historyCollectionPath), orderBy("consumedAt", "desc"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            setHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setIsLoadingHistory(false);
+        });
+        return () => unsubscribe();
+    }, [showHistory, db, userId, job.id]);
+
+    const handleRevertToStock = async (historyEntry) => {
+        if (!db || !userId || !historyEntry) return;
+        const batch = writeBatch(db);
+        const filmRef = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
+        const revertedFilmData = { filmType: historyEntry.filmType, netWeight: historyEntry.netWeight, currentWeight: historyEntry.netWeight, supplier: historyEntry.supplier, purchaseDate: historyEntry.purchaseDate, createdAt: historyEntry.createdAt };
+        batch.set(filmRef, revertedFilmData);
+        batch.delete(doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id));
+        try {
+            await batch.commit();
+            setEditingHistoryEntry(null);
+            setView('stock');
+        } catch (error) {
+            console.error("Error reverting roll to stock from JobCard:", error);
+            alert("Failed to revert roll. See console for details.");
+        }
+    };
+
+    const handleUpdateHistory = async (historyEntry, newDate, newJob) => {
+        if (!db || !userId || !historyEntry || !newJob) return;
+        if (newJob.id === historyEntry.jobId) {
+            const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            try { await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') }); setEditingHistoryEntry(null); }
+            catch (error) { console.error("Error updating history date from JobCard:", error); }
+        } else {
+            const batch = writeBatch(db);
+            const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJob.id}/consumedRolls`));
+            const { id, ...rest } = historyEntry;
+            const newData = { ...rest, jobId: newJob.id, jobName: newJob.jobName, consumedAt: new Date(newDate + 'T00:00:00Z') };
+            batch.set(newHistoryRef, newData);
+            batch.delete(oldHistoryRef);
+            try { await batch.commit(); setEditingHistoryEntry(null); }
+            catch (error) { console.error("Error moving history entry from JobCard:", error); }
+        }
+    };
+
+    return (
+        <>
+            <div className="bg-gray-800 rounded-lg p-4 shadow-md border-l-4 border-gray-600">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h3 className="font-bold text-xl text-gray-100">{job.jobName}</h3>
+                        <p className="text-gray-400">{job.jobSize}</p>
+                        <div className="text-sm text-gray-400 flex gap-4 mt-1">
+                            {job.numberOfColors > 0 && <p>Colours: <span className="font-semibold text-gray-200">{job.numberOfColors}</span></p>}
+                            {job.printType && <p>Print: <span className="font-semibold text-gray-200">{job.printType.charAt(0).toUpperCase() + job.printType.slice(1)}</span></p>}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">Created: {toDDMMYYYY(job.createdAt?.toDate())}</p>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                         <button onClick={() => onEdit(job)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button>
+                         <button onClick={() => setShowStock(prev => !prev)} className="flex items-center text-sm text-yellow-400 hover:text-yellow-300 transition-colors"><ClipboardListIcon /><span className="ml-1">{showStock ? 'Hide' : 'View'} Stock</span></button>
+                         <button onClick={() => setShowHistory(prev => !prev)} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300 transition-colors"><HistoryIcon /><span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span></button>
+                         <button onClick={() => onDelete(job)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
+                    </div>
+                </div>
+                {showStock && (
+                    <div className="mt-4 border-t border-gray-700 pt-4">
+                        <h4 className="font-semibold text-lg text-yellow-400 mb-3">Required Stock Status</h4>
+                        {(job.materials && job.materials.length > 0) ? job.materials.map(material => {
+                            const matchingFilms = films.filter(film => film.filmType.toLowerCase() === material.toLowerCase() && film.currentWeight > 0);
+                            const totalWeight = matchingFilms.reduce((sum, film) => sum + (film.currentWeight || 0), 0);
+                            return (
+                                <div key={material} className="mt-2 p-3 bg-gray-700/50 rounded-lg">
+                                    <div className="flex justify-between items-center">
+                                        <h5 className="font-bold text-gray-200">{material}</h5>
+                                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${matchingFilms.length > 0 ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>{matchingFilms.length > 0 ? 'In Stock' : 'Out of Stock'}</span>
+                                    </div>
+                                    {matchingFilms.length > 0 && <div className="text-sm text-gray-400 mt-2"><p>{matchingFilms.length} roll(s) available. Total Weight: {totalWeight.toFixed(2)} kg</p></div>}
+                                </div>
+                            )
+                        }) : <p className="text-gray-500">No materials specified for this job.</p>}
+                    </div>
+                )}
+                {showHistory && (
+                    <div className="mt-4 border-t border-gray-700 pt-4">
+                        <h4 className="font-semibold text-lg text-cyan-400 mb-2">Consumed Roll History</h4>
+                        {isLoadingHistory ? <p>Loading history...</p> : (history.length > 0 ? <ul className="space-y-2">{history.map(roll => (<li key={roll.id} className="p-2 bg-gray-700 rounded-md flex justify-between items-center"><div><p className="font-semibold">{roll.filmType}</p><p className="text-sm text-gray-400">Consumed on: {toDDMMYYYY(roll.consumedAt)}</p></div><button onClick={() => setEditingHistoryEntry(roll)} className="text-blue-400 hover:text-blue-300"><EditIcon /></button></li>))}</ul> : <p>No rolls have been consumed for this job.</p>)}
+                    </div>
+                )}
+            </div>
+            <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} />
+        </>
+    );
+}
 
 
 // --- ORDER MANAGEMENT COMPONENTS ---
@@ -346,12 +834,39 @@ function OrderManagement({ films, jobs, orders, db, userId, isPdfReady }) {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [orderToDelete, setOrderToDelete] = useState(null);
 
-    // ... (Component logic like handleOrderSubmit, etc. remains unchanged)
+    const handleOrderSubmit = async (orderData) => {
+        if (!db || !userId) return;
+        try {
+            await addDoc(collection(db, `artifacts/${appId}/users/${userId}/orders`), { ...orderData, status: 'active', createdAt: serverTimestamp(), ownerId: userId });
+            setShowForm(false);
+        } catch (error) { console.error("Error creating order:", error); }
+    };
+
+    const handleOpenCompleteModal = (order) => { setOrderToComplete(order); setIsCompleteModalOpen(true); };
+    const handleCloseCompleteModal = () => { setOrderToComplete(null); setIsCompleteModalOpen(false); };
+
+    const markOrderComplete = async (orderId, completionDate) => {
+        if (!db || !userId || !orderId) return;
+        const orderRef = doc(db, `artifacts/${appId}/users/${userId}/orders`, orderId);
+        try {
+            await updateDoc(orderRef, { status: 'completed', completedAt: completionDate });
+        } catch(error) { console.error("Error completing order: ", error); }
+        finally { handleCloseCompleteModal(); }
+    };
+
+    const openDeleteModal = (order) => { setOrderToDelete(order); setIsDeleteModalOpen(true); };
+    const closeDeleteModal = () => { setOrderToDelete(null); setIsDeleteModalOpen(false); };
+    
+    const executeDeleteOrder = async () => {
+        if (!orderToDelete) return;
+        try { await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/orders`, orderToDelete.id)); }
+        catch (error) { console.error("Error deleting order: ", error); }
+        finally { closeDeleteModal(); }
+    };
     
     const activeOrders = useMemo(() => orders.filter(o => o.status === 'active'), [orders]);
     const completedOrders = useMemo(() => orders.filter(o => o.status === 'completed' && o.orderName.toLowerCase().includes(completedSearch.toLowerCase())), [orders, completedSearch]);
 
-    // NEW: Overhauled PDF export for detailed reports.
     const handleExportOrdersPDF = () => {
         const currentOrders = viewType === 'active' ? activeOrders : completedOrders;
         const title = `${viewType.charAt(0).toUpperCase() + viewType.slice(1)} Orders Report`;
@@ -455,16 +970,80 @@ function OrderManagement({ films, jobs, orders, db, userId, isPdfReady }) {
                     </button>
                 </div>
             </div>
-            {/* ... Rest of the component ... */}
+            {showForm && <OrderForm jobs={jobs} onSubmit={handleOrderSubmit} onCancel={() => setShowForm(false)} />}
+            
+            <MarkCompleteModal isOpen={isCompleteModalOpen} onClose={handleCloseCompleteModal} onConfirm={markOrderComplete} order={orderToComplete} />
+            <ConfirmationModal isOpen={isDeleteModalOpen} onClose={closeDeleteModal} onConfirm={executeDeleteOrder} title="Delete Order?">
+                <p>Are you sure you want to delete the order <strong className="text-white">{orderToDelete?.orderName}</strong>? This action cannot be undone.</p>
+            </ConfirmationModal>
+
             {viewType === 'active' ? (
                 <OrderList orders={activeOrders} jobs={jobs} films={films} onDelete={openDeleteModal} onComplete={handleOpenCompleteModal} db={db} userId={userId} />
             ) : (
-                // ... Completed orders list ...
+                <div>
+                     <div className="relative mb-4">
+                        <input type="text" value={completedSearch} onChange={e => setCompletedSearch(e.target.value)} placeholder="Search completed orders..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"/>
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
+                    </div>
+                    <OrderList orders={completedOrders} jobs={jobs} films={films} onDelete={openDeleteModal} db={db} userId={userId} />
+                </div>
             )}
         </section>
     );
 }
-// ... (OrderForm remains unchanged)
+
+function OrderForm({ jobs, onSubmit, onCancel }) {
+    const [orderName, setOrderName] = useState('');
+    const [weightMade, setWeightMade] = useState('');
+    const [metersMade, setMetersMade] = useState('');
+    const [selectedJob, setSelectedJob] = useState(null);
+    const [jobSearch, setJobSearch] = useState('');
+    const [showJobResults, setShowJobResults] = useState(false);
+    const jobSearchRef = useRef(null);
+    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
+
+    useEffect(() => {
+        function handleClickOutside(event) { if (jobSearchRef.current && !jobSearchRef.current.contains(event.target)) { setShowJobResults(false); } }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [jobSearchRef]);
+
+    const filteredJobs = jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : [];
+    const handleJobSelect = (job) => { setSelectedJob(job); setJobSearch(job.jobName); setShowJobResults(false); };
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!selectedJob) { setMessageModal({isOpen: true, title: "Input Error", body: "Please select a job for this order."}); return; }
+        onSubmit({ orderName, weightMade: parseFloat(weightMade) || 0, metersMade: parseFloat(metersMade) || 0, jobId: selectedJob.id, jobName: selectedJob.jobName });
+    };
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg mb-8 shadow-lg">
+            <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>{messageModal.body}</MessageModal>
+            <h3 className="text-xl font-semibold mb-4 text-cyan-400">Add New Order</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <input value={orderName} onChange={e => setOrderName(e.target.value)} placeholder="Order Name / Customer" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="number" step="0.01" value={weightMade} onChange={e => setWeightMade(e.target.value)} placeholder="Weight to be Made (kg)" className="w-full bg-gray-700 p-2 rounded-md" />
+                    <input type="number" step="0.01" value={metersMade} onChange={e => setMetersMade(e.target.value)} placeholder="Meters to be Made" className="w-full bg-gray-700 p-2 rounded-md" />
+                </div>
+                <div ref={jobSearchRef} className="relative">
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Select Associated Job</label>
+                    <input type="text" value={jobSearch} onChange={e => { setJobSearch(e.target.value); setShowJobResults(true); }} onFocus={() => setShowJobResults(true)} placeholder="Type to search for a job..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                    <div className="absolute inset-y-0 left-0 pl-3 top-6 flex items-center pointer-events-none"><SearchIcon /></div>
+                    {showJobResults && jobSearch && (
+                        <div className="absolute z-10 mt-1 w-full max-h-40 overflow-y-auto bg-gray-700 rounded-md border border-gray-600">
+                            {filteredJobs.length > 0 ? filteredJobs.map(job => (<div key={job.id} onClick={() => handleJobSelect(job)} className="p-2 cursor-pointer hover:bg-cyan-600">{job.jobName}</div>)) : <div className="p-2 text-gray-400">No jobs found.</div>}
+                        </div>
+                    )}
+                </div>
+                <div className="flex items-center space-x-4 pt-2">
+                    <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full">Create Order</button>
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
+                </div>
+            </form>
+        </div>
+    );
+}
 
 function OrderList({ orders, jobs, films, onDelete, onComplete, db, userId }) {
     if (orders.length === 0) return <p className="text-center text-gray-500 py-8">No orders found.</p>;
@@ -477,11 +1056,321 @@ function OrderCard({ order, jobs, films, onDelete, onComplete, db, userId }) {
     const [history, setHistory] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     
-    // NEW: Use the reusable helper function here as well
     const stockStatus = useMemo(() => calculateStockStatus(job, films), [job, films]);
 
-    // ... (Rest of OrderCard remains the same)
+    const toggleHistory = async () => {
+        if (!showHistory && job) {
+            setIsLoadingHistory(true);
+            const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
+            const q = query(collection(db, historyCollectionPath), orderBy("consumedAt", "desc"));
+            const querySnapshot = await getDocs(q);
+            setHistory(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setIsLoadingHistory(false);
+        }
+        setShowHistory(prev => !prev);
+    };
+
+    return (
+        <div className={`bg-gray-800 rounded-lg p-4 shadow-md border-l-4 ${order.status === 'completed' ? 'border-purple-500' : (stockStatus.ready ? 'border-green-500' : 'border-red-500')}`}>
+            <div className="flex justify-between items-start gap-4">
+                <div>
+                    <h3 className="font-bold text-xl text-white">{order.orderName}</h3>
+                    <p className="text-gray-400">Job: {order.jobName}</p>
+                    <div className="flex flex-wrap gap-x-4 text-sm text-gray-300 mt-1">
+                        {order.weightMade > 0 && <span>Weight: <span className="font-semibold">{order.weightMade} kg</span></span>}
+                        {order.metersMade > 0 && <span>Meters: <span className="font-semibold">{order.metersMade} m</span></span>}
+                    </div>
+                     <p className="text-xs text-gray-500 mt-1">Ordered: {toDDMMYYYY(order.createdAt?.toDate())}</p>
+                     {order.status === 'completed' && <p className="text-xs text-purple-400 mt-1">Completed: {toDDMMYYYY(order.completedAt?.toDate())}</p>}
+                </div>
+                <div className="flex flex-col items-end space-y-2 flex-shrink-0">
+                    <button onClick={() => onDelete(order)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
+                    {order.status === 'active' && onComplete && (
+                        <button onClick={() => onComplete(order)} className="flex items-center text-sm bg-green-600 hover:bg-green-700 text-white font-semibold py-1 px-3 rounded-lg">
+                            <CheckCircleIcon /><span className="ml-2">Mark Complete</span>
+                        </button>
+                    )}
+                </div>
+            </div>
+            {job && (
+                <div className="mt-4 border-t border-gray-700 pt-3">
+                    <div className="flex justify-between items-center">
+                         <h4 className="font-semibold text-md mb-2 text-gray-300">Job Details & Stock Status</h4>
+                         <button onClick={toggleHistory} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300"><HistoryIcon /><span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span></button>
+                    </div>
+                    <div className="text-sm text-gray-400 mb-2 flex flex-wrap gap-x-4">
+                        <p>Job Size: <span className="font-semibold text-gray-200">{job.jobSize || 'N/A'}</span></p>
+                        {job.numberOfColors != null && <p>Colours: <span className="font-semibold text-gray-200">{job.numberOfColors}</span></p>}
+                        {job.printType && <p>Print Type: <span className="font-semibold text-gray-200">{job.printType.charAt(0).toUpperCase() + job.printType.slice(1)}</span></p>}
+                    </div>
+                    <div className="space-y-1">
+                        {stockStatus.details.map((detail, i) => (<div key={i} className="flex justify-between items-center text-sm"><span className="text-gray-300">{detail.name}</span>{detail.inStock ? <span className="font-semibold text-green-400">{detail.rollCount} rolls ({detail.totalWeight.toFixed(2)} kg)</span> : <span className="font-semibold text-red-400">Out of Stock</span>}</div>))}
+                    </div>
+                     {showHistory && (
+                         <div className="mt-4 border-t border-gray-600 pt-3">
+                             <h5 className="font-semibold text-cyan-400 mb-2">Consumed Roll History</h5>
+                             {isLoadingHistory ? <p className="text-sm text-gray-400">Loading history...</p> : (history.length > 0 ? <ul className="space-y-2 text-sm">{history.map(roll => (<li key={roll.id} className="p-2 bg-gray-700/50 rounded-md"><p className="font-semibold text-gray-200">{roll.filmType}</p><p className="text-gray-400">Consumed: {toDDMMYYYY(roll.consumedAt?.toDate())}</p></li>))}</ul> : <p className="text-sm text-gray-400">No rolls consumed for this job yet.</p>)}
+                         </div>
+                     )}
+                </div>
+            )}
+        </div>
+    );
 }
 
-// ... (UseStock, FilmHistory, and AdvancedEditHistoryModal components also need to be passed the isPdfReady prop and use it to disable their respective buttons, similar to FilmInventory and JobManagement)
-// The rest of the file (UseStock, FilmHistory, AdvancedEditHistoryModal) is unchanged from the previous version, but for completeness, ensure you pass isPdfReady to FilmHistory and disable its export button accordingly.
+// --- Use Stock Components ---
+function UseStock({ films, jobs, db, userId, setView }) {
+    const [selectedJob, setSelectedJob] = useState(null);
+    const [jobSearch, setJobSearch] = useState('');
+    const [showJobResults, setShowJobResults] = useState(false);
+    const [selectedFilmType, setSelectedFilmType] = useState('');
+    const [selectedRoll, setSelectedRoll] = useState(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [dateOfUse, setDateOfUse] = useState(toYYYYMMDD(new Date()));
+    const jobSearchRef = useRef(null);
+    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
+
+    useEffect(() => {
+        function handleClickOutside(event) { if (jobSearchRef.current && !jobSearchRef.current.contains(event.target)) { setShowJobResults(false); } }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [jobSearchRef]);
+
+    useEffect(() => {
+        if (selectedJob?.materials?.length > 0) {
+            const typesInStock = [...new Set(films.filter(f => f.currentWeight > 0 && selectedJob.materials.some(m => m.toLowerCase() === f.filmType.toLowerCase())).map(f => f.filmType))];
+            setSelectedFilmType(typesInStock.length === 1 ? typesInStock[0] : '');
+        } else { setSelectedFilmType(''); }
+        setSelectedRoll(null); 
+    }, [selectedJob, films]);
+
+    const handleUseRoll = async () => {
+        if (!selectedRoll || !selectedJob || !db) { setMessageModal({isOpen: true, title: "Input Error", body: "A job and a film roll must be selected."}); return; }
+        setIsProcessing(true);
+        const batch = writeBatch(db);
+        const historyData = { filmType: selectedRoll.filmType, netWeight: selectedRoll.netWeight, supplier: selectedRoll.supplier, purchaseDate: selectedRoll.purchaseDate, createdAt: selectedRoll.createdAt, originalId: selectedRoll.id, consumedAt: new Date(dateOfUse + 'T00:00:00Z'), jobId: selectedJob.id, jobName: selectedJob.jobName, consumedBy: userId };
+        batch.set(doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${selectedJob.id}/consumedRolls`)), historyData);
+        batch.delete(doc(db, `artifacts/${appId}/users/${userId}/films`, selectedRoll.id));
+        try {
+            await batch.commit();
+            setMessageModal({isOpen: true, title: "Success", body: "Roll has been used and recorded in the job history."});
+            setView('jobs');
+        } catch (error) {
+            console.error("CRITICAL ERROR in handleUseRoll:", error);
+            setMessageModal({isOpen: true, title: "Database Error", body: `Failed to use roll. Please check console for details.`});
+        } finally { setIsProcessing(false); }
+    };
+    
+    const filteredJobs = jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : [];
+    const handleJobSelect = (job) => { setSelectedJob(job); setJobSearch(job.jobName); setShowJobResults(false); };
+    const availableFilmTypes = useMemo(() => {
+        const types = [...new Set(films.filter(f => f.currentWeight > 0).map(f => f.filmType))].sort();
+        if (selectedJob?.materials?.length > 0) return types.filter(t => selectedJob.materials.some(m => m.toLowerCase() === t.toLowerCase()));
+        return types;
+    }, [films, selectedJob]);
+    const availableRolls = selectedFilmType ? films.filter(f => f.filmType === selectedFilmType && f.currentWeight > 0) : [];
+
+    return (
+        <section>
+             <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>{messageModal.body}</MessageModal>
+            <h2 className="text-2xl font-semibold text-gray-200 mb-6">Record Stock Usage</h2>
+            <div className="bg-gray-800 p-6 rounded-lg shadow-lg space-y-6">
+                <div ref={jobSearchRef}>
+                    <label className="block text-sm font-medium text-cyan-400 mb-2">1. Search and Select Job</label>
+                    <div className="relative">
+                        <input type="text" value={jobSearch} onChange={e => { setJobSearch(e.target.value); setShowJobResults(true);}} onFocus={() => setShowJobResults(true)} placeholder="Type to search for a job..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
+                    </div>
+                    {showJobResults && jobSearch && (
+                        <div className="absolute z-10 mt-1 w-full max-h-40 overflow-y-auto bg-gray-700 rounded-md border border-gray-600">
+                            {filteredJobs.length > 0 ? filteredJobs.map(job => (<div key={job.id} onClick={() => handleJobSelect(job)} className="p-2 cursor-pointer hover:bg-cyan-600">{job.jobName}</div>)) : <div className="p-2 text-gray-400">No jobs found.</div>}
+                        </div>
+                    )}
+                </div>
+                {selectedJob && (
+                    <div>
+                        <label className="block text-sm font-medium text-cyan-400 mb-2">2. Select Film Type (Filtered by Job)</label>
+                        <select value={selectedFilmType} onChange={e => { setSelectedFilmType(e.target.value); setSelectedRoll(null); }} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" >
+                            <option value="">-- Select a Film Type --</option>
+                            {availableFilmTypes.map(type => <option key={type} value={type}>{type}</option>)}
+                        </select>
+                    </div>
+                )}
+                {selectedFilmType && (
+                     <div className="border-t border-gray-700 pt-6 space-y-4">
+                        <h3 className="text-lg font-medium text-cyan-400 mb-2">3. Select a Roll to Use</h3>
+                         {availableRolls.length > 0 ? <div className="space-y-2 max-h-60 overflow-y-auto pr-2">{availableRolls.map(roll => (<button key={roll.id} onClick={() => setSelectedRoll(roll)} disabled={isProcessing} className={`w-full text-left p-3 rounded-md cursor-pointer transition-all ${selectedRoll?.id === roll.id ? 'bg-cyan-500 text-white shadow-lg' : 'bg-gray-700 hover:bg-gray-600'} disabled:opacity-50 disabled:cursor-wait`}><div className="font-bold">{roll.filmType}</div><div className="text-sm">Supplier: {roll.supplier} | Wt: {roll.currentWeight.toFixed(2)}kg</div><div className="text-xs text-gray-400">ID: {roll.id}</div></button>))}</div> : <p className="text-gray-500 pt-4 ">No rolls of type '{selectedFilmType}' currently in stock.</p>}
+                    </div>
+                )}
+                {selectedRoll && (
+                    <div className="border-t border-gray-700 pt-6 space-y-4">
+                        <h3 className="text-lg font-medium text-cyan-400">4. Confirm Usage</h3>
+                        <div>
+                            <p>Selected Job: <span className="font-semibold">{selectedJob.jobName}</span></p>
+                            <p>Selected Roll: <span className="font-bold">{selectedRoll.filmType}</span> from <span className="font-bold">{selectedRoll.supplier}</span></p>
+                        </div>
+                         <div>
+                            <label className="block text-sm font-medium text-cyan-400 mb-2">Date of Use</label>
+                            <input type="date" value={dateOfUse} onChange={(e) => setDateOfUse(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                        </div>
+                        <button onClick={handleUseRoll} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-red-800 disabled:cursor-wait">{isProcessing ? 'Processing...' : 'Confirm & Use Selected Roll'}</button>
+                    </div>
+                )}
+            </div>
+        </section>
+    );
+}
+
+// --- GLOBAL FILM HISTORY ---
+function FilmHistory({ db, userId, jobs, setView, isPdfReady }) {
+    const [history, setHistory] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [historySearch, setHistorySearch] = useState('');
+    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
+
+    useEffect(() => {
+        if (!db || !userId) { setIsLoading(false); return; }
+        setIsLoading(true);
+        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const combinedHistory = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
+            setHistory(combinedHistory);
+            setIsLoading(false);
+        }, (error) => { console.error("Error fetching global film history:", error); setIsLoading(false); });
+        return () => unsubscribe();
+    }, [db, userId]);
+
+    const handleRevertToStock = async (historyEntry) => {
+        if (!db || !userId || !historyEntry) return;
+        const batch = writeBatch(db);
+        const filmRef = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
+        const revertedFilmData = { filmType: historyEntry.filmType, netWeight: historyEntry.netWeight, currentWeight: historyEntry.netWeight, supplier: historyEntry.supplier, purchaseDate: historyEntry.purchaseDate, createdAt: historyEntry.createdAt };
+        batch.set(filmRef, revertedFilmData);
+        batch.delete(doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id));
+        try {
+            await batch.commit();
+            alert("Roll successfully reverted to stock.");
+            setEditingHistoryEntry(null);
+            setView('stock');
+        } catch (error) {
+            console.error("Error reverting roll to stock:", error);
+            alert("Failed to revert roll. Check console for details.");
+        }
+    };
+
+    const handleUpdateHistory = async (historyEntry, newDate, newJob) => {
+        if (!db || !userId || !historyEntry || !newJob) return;
+        if (newJob.id === historyEntry.jobId) {
+            const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            try { await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') }); setEditingHistoryEntry(null); }
+            catch (error) { console.error("Error updating history date:", error); alert("Failed to update date."); }
+        } else {
+            const batch = writeBatch(db);
+            const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJob.id}/consumedRolls`));
+            const { id, ...rest } = historyEntry;
+            const newData = { ...rest, jobId: newJob.id, jobName: newJob.jobName, consumedAt: new Date(newDate + 'T00:00:00Z') };
+            batch.set(newHistoryRef, newData);
+            batch.delete(oldHistoryRef);
+            try { await batch.commit(); setEditingHistoryEntry(null); }
+            catch (error) { console.error("Error moving history entry:", error); alert("Failed to move history entry."); }
+        }
+    };
+
+    const filteredHistory = useMemo(() => history.filter(item => {
+        const searchTerm = historySearch.toLowerCase();
+        return item.filmType?.toLowerCase().includes(searchTerm) || item.jobName?.toLowerCase().includes(searchTerm);
+    }), [history, historySearch]);
+
+    const handleExportHistoryPDF = () => {
+        const title = "Global Film Usage History Report";
+        const head = [['Film Type', 'Used in Job', 'Date Used', 'Supplier', 'Original Wt. (kg)']];
+        const body = filteredHistory.map(item => [ item.filmType, item.jobName, toDDMMYYYY(item.consumedAt), item.supplier, item.netWeight?.toFixed(2)]);
+        const fileName = `film-history-report-${toYYYYMMDD(new Date())}.pdf`;
+        exportToPDF(title, head, body, fileName);
+    };
+
+    return(
+        <section>
+            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
+                <div className="relative w-full md:w-1/2"><input type="text" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search by film or job name..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" /><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div></div>
+                <button 
+                    onClick={handleExportHistoryPDF} 
+                    disabled={!isPdfReady}
+                    className={`flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 hover:scale-105 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={!isPdfReady ? "PDF exporter is loading..." : "Export history to PDF"}
+                >
+                    <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
+                </button>
+            </div>
+            {isLoading ? <p>Loading history...</p> : (<div className="space-y-3">{filteredHistory.length > 0 ? filteredHistory.map(item => (<div key={item.id + item.jobId} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center"><div><p className="font-bold text-lg text-cyan-400">{item.filmType}</p><p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p><p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt)}</p><p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p></div><button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button></div>)) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}</div>)}
+            <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} />
+        </section>
+    );
+}
+
+function AdvancedEditHistoryModal({ isOpen, onClose, historyEntry, jobs, onUpdate, onRevert }) {
+    const [consumedAt, setConsumedAt] = useState('');
+    const [selectedJobId, setSelectedJobId] = useState('');
+    const [showRevertConfirm, setShowRevertConfirm] = useState(false);
+
+    useEffect(() => {
+        if (historyEntry) {
+            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
+            setSelectedJobId(historyEntry.jobId || '');
+            setShowRevertConfirm(false);
+        }
+    }, [historyEntry]);
+
+    if (!isOpen || !historyEntry) return null;
+
+    const handleUpdate = () => {
+        const job = jobs.find(j => j.id === selectedJobId);
+        if (!job) { alert("Please select a valid job."); return; }
+        onUpdate(historyEntry, consumedAt, job);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
+                <div className="space-y-4">
+                    <p className="text-white bg-gray-700 p-3 rounded-md">Film: <strong className="font-semibold">{historyEntry.filmType}</strong></p>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
+                        <input type="date" value={consumedAt} onChange={(e) => setConsumedAt(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Used in Job</label>
+                        <select value={selectedJobId} onChange={(e) => setSelectedJobId(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                            <option value="" disabled>-- Select a Job --</option>
+                            {jobs.map(job => (<option key={job.id} value={job.id}>{job.jobName}</option>))}
+                        </select>
+                    </div>
+                </div>
+                <div className="mt-6 border-t border-gray-700 pt-4">
+                    <h4 className="text-lg font-semibold text-red-400">Danger Zone</h4>
+                    <div className="mt-2 p-3 bg-red-900/20 rounded-lg">
+                        {!showRevertConfirm ? (<button onClick={() => setShowRevertConfirm(true)} className="w-full text-left text-red-400 hover:text-red-300">Revert to Stock (Delete History Entry)...</button>) : (
+                            <div>
+                                <p className="text-white">This will delete the history entry and add the roll back to inventory. Are you sure?</p>
+                                <div className="flex gap-4 mt-3">
+                                    <button onClick={() => onRevert(historyEntry)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg w-full">Yes, Revert</button>
+                                    <button onClick={() => setShowRevertConfirm(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div className="flex justify-end mt-6 gap-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update Entry</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+export default App;
