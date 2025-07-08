@@ -121,7 +121,6 @@ function App() {
         
         if (isPdfReady) return;
 
-        // Script loading function
         const loadScript = (id, src, onLoad) => {
             if (document.getElementById(id)) {
                 if(onLoad) onLoad();
@@ -136,9 +135,7 @@ function App() {
         };
         
         loadScript(jspdfScriptId, "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", () => {
-            console.log("jsPDF script loaded.");
             loadScript(autoTableScriptId, "https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js", () => {
-                console.log("jsPDF AutoTable plugin loaded.");
                 setIsPdfReady(true);
             });
         });
@@ -237,7 +234,9 @@ function App() {
         </div>
     );
 }
-
+// ... The rest of the components start here and are identical to the previous version,
+// except for the OrderManagement component, which has the updated PDF logic.
+// The full, unchanged code for all other components is provided below for completeness.
 // --- Login Screen Component ---
 function LoginScreen({ auth }) {
     const [email, setEmail] = useState('');
@@ -873,73 +872,74 @@ function OrderManagement({ films, jobs, orders, db, userId, isPdfReady }) {
         const fileName = `orders-${viewType}-report-${toYYYYMMDD(new Date())}.pdf`;
 
         const doc = new window.jspdf.jsPDF();
-        doc.setFontSize(18);
-        doc.text(title, 14, 22);
-        doc.setFontSize(10);
-        doc.text(`Report generated on: ${new Date().toLocaleDateString()}`, 14, 30);
+        let yPos = 22;
 
-        let yPos = 40; 
+        doc.setFontSize(18);
+        doc.text(title, 14, yPos);
+        yPos += 8;
+        doc.setFontSize(10);
+        doc.text(`Report generated on: ${new Date().toLocaleDateString()}`, 14, yPos);
+        yPos += 12;
 
         currentOrders.forEach((order, index) => {
             if (yPos > 220 && index > 0) {
                 doc.addPage();
-                yPos = 20;
+                yPos = 22;
             }
 
             const job = jobs.find(j => j.id === order.jobId);
             const stockStatus = calculateStockStatus(job, films);
 
-            doc.setFontSize(14);
+            doc.setFontSize(12);
             doc.setFont(undefined, 'bold');
-            doc.text(`Order: ${order.orderName || 'N/A'}`, 14, yPos);
-            yPos += 8;
+            doc.text('ORDER DETAILS', 14, yPos);
+            yPos += 7;
 
             doc.setFontSize(10);
             doc.setFont(undefined, 'normal');
-
-            // Two-column layout for details
-            const detailsCol1 = [
-                `Weight to be Made: ${order.weightMade || '0'} kg`,
-                `Meters to be Made: ${order.metersMade || '0'} m`,
-                `Status: ${order.status || 'N/A'}`
+            
+            const orderDetails = [
+                `PARTY NAME - ${order.orderName || 'N/A'}`,
+                `JOB NAME - ${job?.jobName || 'N/A'}`,
+                `JOB SIZE - ${job?.jobSize || 'N/A'}`,
+                `COLOURS - ${job?.numberOfColors || 'N/A'}`,
+                `PRINTING TYPE - ${job?.printType ? job.printType.toUpperCase() : 'N/A'}`,
+                `TOTAL ORDER QUANTITY - ${order.weightMade || '0'} KGS`
             ];
-            const detailsCol2 = [
-                `Associated Job: ${job?.jobName || 'N/A'}`,
-                `Job Size: ${job?.jobSize || 'N/A'}`,
-                `Colours: ${job?.numberOfColors || 'N/A'}`,
-                `Print Type: ${job?.printType ? (job.printType.charAt(0).toUpperCase() + job.printType.slice(1)) : 'N/A'}`
-            ];
+            
+            doc.text(orderDetails, 14, yPos);
+            yPos += (orderDetails.length * 5) + 5;
 
-            doc.text(detailsCol1, 14, yPos);
-            doc.text(detailsCol2, 105, yPos);
-            yPos += (detailsCol1.length * 5) + 5;
-
-            if (stockStatus.details.length > 0) {
-                const head = [['Material', 'Stock Status', 'Available Rolls', 'Total Weight (kg)']];
-                const body = stockStatus.details.map(detail => [
-                    detail.name,
-                    detail.inStock ? 'In Stock' : 'Out of Stock',
-                    detail.rollCount,
-                    detail.totalWeight.toFixed(2)
-                ]);
+            if (job?.materials?.length > 0) {
+                const head = [['MATERIAL TO BE USED', 'WEIGHT TO BE MADE (IN KG)', 'METERS TO BE MADE', 'STOCK (IN KGS)', 'STOCK (IN ROLLS)']];
+                const body = job.materials.map(material => {
+                    const materialStock = stockStatus.details.find(d => d.name === material);
+                    return [
+                        material,
+                        order.weightMade || 0,
+                        order.metersMade || 0,
+                        materialStock ? materialStock.totalWeight.toFixed(2) : '0.00',
+                        materialStock ? materialStock.rollCount : 0
+                    ];
+                });
 
                 doc.autoTable({
                     startY: yPos,
-                    head: head, body: body,
-                    theme: 'striped',
-                    headStyles: { fillColor: [60, 60, 60] }
+                    head: head,
+                    body: body,
+                    theme: 'grid',
+                    headStyles: { fillColor: [220, 220, 220], textColor: [0, 0, 0] }
                 });
-                
-                yPos = doc.autoTable.previous.finalY + 10;
+
+                yPos = doc.autoTable.previous.finalY + 15;
             } else {
                  doc.text('No materials specified for this job.', 14, yPos);
-                 yPos += 10;
+                 yPos += 15;
             }
 
             if (index < currentOrders.length - 1) {
-                doc.setDrawColor(80, 80, 80);
-                doc.line(14, yPos, 196, yPos);
-                yPos += 10;
+                doc.setDrawColor(180, 180, 180);
+                doc.line(14, yPos - 7, 196, yPos - 7);
             }
         });
 
