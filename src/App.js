@@ -243,8 +243,6 @@ const LoginScreen = React.memo(function LoginScreen({ auth }) {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
 
-    // THIS IS THE FIX: The dependency array for useCallback now correctly includes
-    // email and password, so the function gets the latest values when you click login.
     const handleLogin = useCallback(async (e) => {
         e.preventDefault();
         setError('');
@@ -305,23 +303,40 @@ const ConfirmationModal = React.memo(function ConfirmationModal({ isOpen, onClos
     );
 });
 
+// NEW: Updated modal to include notes
 const MarkCompleteModal = React.memo(function MarkCompleteModal({ isOpen, onClose, onConfirm, order }) {
     const [completionDate, setCompletionDate] = useState(toYYYYMMDD(new Date()));
+    const [notes, setNotes] = useState('');
+
     useEffect(() => {
         if(isOpen) {
             setCompletionDate(toYYYYMMDD(new Date()));
+            setNotes('');
         }
     }, [isOpen]);
     
     if (!isOpen) return null;
-    const handleConfirm = () => onConfirm(order.id, new Date(completionDate + 'T00:00:00Z'));
+
+    const handleConfirm = () => {
+        onConfirm(order.id, new Date(completionDate + 'T00:00:00Z'), notes);
+    };
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
             <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md m-4">
                 <h3 className="text-xl font-bold text-cyan-400 mb-4">Complete Order</h3>
                 <p className="text-gray-300 mb-4">Select a completion date for order <strong className="text-white">{order?.orderName}</strong>.</p>
-                <input type="date" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none mb-6" />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Completion Date</label>
+                <input type="date" value={completionDate} onChange={(e) => setCompletionDate(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none mb-4" />
+                
+                <label className="block text-sm font-medium text-gray-300 mb-1">Notes (Optional)</label>
+                <textarea 
+                    value={notes} 
+                    onChange={e => setNotes(e.target.value)}
+                    placeholder="Add any notes for this completed order..."
+                    className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none mb-6 h-24"
+                />
+
                 <div className="flex justify-end gap-4">
                     <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
                     <button onClick={handleConfirm} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Confirm Completion</button>
@@ -564,7 +579,7 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
     const [showForm, setShowForm] = useState(false);
     const [editingJob, setEditingJob] = useState(null);
     const [jobSearch, setJobSearch] = useState('');
-    const [isDeleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [jobToDelete, setJobToDelete] = useState(null);
     const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
     const [messageModalContent, setMessageModalContent] = useState({title: '', body: ''});
@@ -899,11 +914,16 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
     const handleOpenCompleteModal = useCallback((order) => { setOrderToComplete(order); setIsCompleteModalOpen(true); }, []);
     const handleCloseCompleteModal = useCallback(() => { setOrderToComplete(null); setIsCompleteModalOpen(false); }, []);
 
-    const markOrderComplete = useCallback(async (orderId, completionDate) => {
+    const markOrderComplete = useCallback(async (orderId, completionDate, notes) => {
         if (!db || !userId || !orderId) return;
         const orderRef = doc(db, `artifacts/${appId}/users/${userId}/orders`, orderId);
         try {
-            await updateDoc(orderRef, { status: 'completed', completedAt: completionDate, planningIndex: -1 });
+            await updateDoc(orderRef, { 
+                status: 'completed', 
+                completedAt: completionDate, 
+                planningIndex: -1,
+                notes: notes || ''
+            });
         } catch(error) {
             console.error("Error completing order: ", error);
         } finally {
@@ -922,7 +942,7 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
     }, [db, userId, orderToDelete, closeDeleteModal]);
     
     const activeOrders = useMemo(() => orders.filter(o => o.status === 'active' && o.planningIndex !== undefined).sort((a, b) => (a.planningIndex || 0) - (b.planningIndex || 0)), [orders]);
-    const completedOrders = useMemo(() => orders.filter(o => o.status === 'completed' && o.orderName.toLowerCase().includes(completedSearch.toLowerCase())), [orders, completedSearch]);
+    const completedOrders = useMemo(() => orders.filter(o => o.status === 'completed' && o.orderName.toLowerCase().includes(completedSearch.toLowerCase())).sort((a,b) => (b.completedAt?.toDate() || 0) - (a.completedAt?.toDate() || 0)), [orders, completedSearch]);
 
     const handleReorder = useCallback(async (orderToMove, direction) => {
         const orderIndex = activeOrders.findIndex(o => o.id === orderToMove.id);
@@ -1143,9 +1163,14 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
             setIsLoadingHistory(true);
             const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
             const q = query(collection(db, historyCollectionPath), orderBy("consumedAt", "desc"));
-            const querySnapshot = await getDocs(q);
-            setHistory(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            setIsLoadingHistory(false);
+            try {
+                const querySnapshot = await getDocs(q);
+                setHistory(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            } catch (error) {
+                console.error("Error fetching job history in OrderCard: ", error);
+            } finally {
+                setIsLoadingHistory(false);
+            }
         }
         setShowHistory(prev => !prev);
     }, [showHistory, job, db, userId]);
@@ -1162,6 +1187,7 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
                     </div>
                      <p className="text-xs text-gray-500 mt-1">Ordered: {toDDMMYYYY(order.createdAt?.toDate())}</p>
                      {order.status === 'completed' && <p className="text-xs text-purple-400 mt-1">Completed: {toDDMMYYYY(order.completedAt?.toDate())}</p>}
+                     {order.status === 'completed' && order.notes && <p className="text-sm text-gray-400 mt-2 italic"><strong>Notes:</strong> {order.notes}</p>}
                 </div>
                 <div className="flex flex-col items-end space-y-2 flex-shrink-0">
                     <button onClick={() => onDelete(order)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
@@ -1172,13 +1198,13 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
                     )}
                     {order.status === 'active' && onReorder && (
                         <div className="flex gap-2 items-center">
-                            <button onClick={() => onReorder(order, 'up')} disabled={isFirst} className="text-gray-400 disabled:opacity-30 enabled:hover:text-green-400"><ArrowUpIcon /></button>
-                            <button onClick={() => onReorder(order, 'down')} disabled={isLast} className="text-gray-400 disabled:opacity-30 enabled:hover:text-red-400"><ArrowDownIcon /></button>
+                            <button onClick={() => onReorder(order, 'up')} disabled={isFirst} className="text-gray-400 disabled:opacity-30 enabled:hover:text-green-400" title="Move Up"><ArrowUpIcon /></button>
+                            <button onClick={() => onReorder(order, 'down')} disabled={isLast} className="text-gray-400 disabled:opacity-30 enabled:hover:text-red-400" title="Move Down"><ArrowDownIcon /></button>
                         </div>
                     )}
                 </div>
             </div>
-            {job && (
+            {order.status === 'active' && job && (
                 <div className="mt-4 border-t border-gray-700 pt-3">
                     <div className="flex justify-between items-center">
                          <h4 className="font-semibold text-md mb-2 text-gray-300">Job Details & Stock Status</h4>
