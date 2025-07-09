@@ -238,13 +238,12 @@ function App() {
     );
 }
 
-// All other components are wrapped in React.memo for performance.
 const LoginScreen = React.memo(function LoginScreen({ auth }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
 
-    const handleLogin = async (e) => {
+    const handleLogin = useCallback(async (e) => {
         e.preventDefault();
         setError('');
         try {
@@ -259,7 +258,7 @@ const LoginScreen = React.memo(function LoginScreen({ auth }) {
             }
             console.error("Login Error:", error);
         }
-    };
+    }, [auth]);
 
     return (
         <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
@@ -374,9 +373,6 @@ const Nav = React.memo(function Nav({ view, setView }) {
     );
 });
 
-// The rest of the app's components, fully implemented and memoized.
-// Note the use of React.memo and useCallback for performance optimization.
-
 const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingFilm, setEditingFilm] = useState(null);
@@ -391,11 +387,11 @@ const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isP
         try {
             if (editingFilm) {
                 await updateDoc(doc(db, filmsCollectionPath, editingFilm.id), dataToSave);
-                setEditingFilm(null);
             } else {
                 await addDoc(collection(db, filmsCollectionPath), { ...dataToSave, currentWeight: dataToSave.netWeight, createdAt: serverTimestamp() });
             }
             setShowForm(false);
+            setEditingFilm(null);
         } catch (error) { console.error("Error saving film:", error); }
     }, [db, userId, editingFilm]);
 
@@ -558,8 +554,6 @@ const FilmList = React.memo(function FilmList({ films, onEdit, onDelete }) {
     );
 });
 
-// ... The rest of the file follows, with every component memoized. This ensures a complete file.
-// The code below is identical to the last full correct version but is included for completeness.
 const JobManagement = React.memo(function JobManagement({ films, jobs, orders, db, userId, setView, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingJob, setEditingJob] = useState(null);
@@ -575,11 +569,11 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
         try {
              if (editingJob) {
                 await updateDoc(doc(db, jobsCollectionPath, editingJob.id), jobData);
-                setEditingJob(null);
             } else {
                 await addDoc(collection(db, jobsCollectionPath), { ...jobData, createdAt: serverTimestamp() });
             }
             setShowForm(false);
+            setEditingJob(null);
         } catch (error) { console.error("Error saving job:", error); }
     }, [db, userId, editingJob]);
 
@@ -1073,7 +1067,56 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
 });
 
 const OrderForm = React.memo(function OrderForm({ jobs, onSubmit, onCancel }) {
-    // ... (This component remains the same)
+    const [orderName, setOrderName] = useState('');
+    const [weightMade, setWeightMade] = useState('');
+    const [metersMade, setMetersMade] = useState('');
+    const [selectedJob, setSelectedJob] = useState(null);
+    const [jobSearch, setJobSearch] = useState('');
+    const [showJobResults, setShowJobResults] = useState(false);
+    const jobSearchRef = useRef(null);
+    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
+
+    useEffect(() => {
+        function handleClickOutside(event) { if (jobSearchRef.current && !jobSearchRef.current.contains(event.target)) { setShowJobResults(false); } }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [jobSearchRef]);
+
+    const filteredJobs = useMemo(() => jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : [], [jobs, jobSearch]);
+    const handleJobSelect = (job) => { setSelectedJob(job); setJobSearch(job.jobName); setShowJobResults(false); };
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!selectedJob) { setMessageModal({isOpen: true, title: "Input Error", body: "Please select a job for this order."}); return; }
+        onSubmit({ orderName, weightMade: parseFloat(weightMade) || 0, metersMade: parseFloat(metersMade) || 0, jobId: selectedJob.id, jobName: selectedJob.jobName });
+    };
+
+    return (
+        <div className="bg-gray-800 p-6 rounded-lg mb-8 shadow-lg">
+            <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>{messageModal.body}</MessageModal>
+            <h3 className="text-xl font-semibold mb-4 text-cyan-400">Add New Order</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <input value={orderName} onChange={e => setOrderName(e.target.value)} placeholder="Order Name / Customer" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input type="number" step="0.01" value={weightMade} onChange={e => setWeightMade(e.target.value)} placeholder="Weight to be Made (kg)" className="w-full bg-gray-700 p-2 rounded-md" />
+                    <input type="number" step="0.01" value={metersMade} onChange={e => setMetersMade(e.target.value)} placeholder="Meters to be Made" className="w-full bg-gray-700 p-2 rounded-md" />
+                </div>
+                <div ref={jobSearchRef} className="relative">
+                    <label className="block text-sm font-medium text-gray-300 mb-1">Select Associated Job</label>
+                    <input type="text" value={jobSearch} onChange={e => { setJobSearch(e.target.value); setShowJobResults(true); }} onFocus={() => setShowJobResults(true)} placeholder="Type to search for a job..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                    <div className="absolute inset-y-0 left-0 pl-3 top-6 flex items-center pointer-events-none"><SearchIcon /></div>
+                    {showJobResults && jobSearch && (
+                        <div className="absolute z-10 mt-1 w-full max-h-40 overflow-y-auto bg-gray-700 rounded-md border border-gray-600">
+                            {filteredJobs.length > 0 ? filteredJobs.map(job => (<div key={job.id} onClick={() => handleJobSelect(job)} className="p-2 cursor-pointer hover:bg-cyan-600">{job.jobName}</div>)) : <div className="p-2 text-gray-400">No jobs found.</div>}
+                        </div>
+                    )}
+                </div>
+                <div className="flex items-center space-x-4 pt-2">
+                    <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full">Create Order</button>
+                    <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
+                </div>
+            </form>
+        </div>
+    );
 });
 
 const OrderList = React.memo(function OrderList({ orders, jobs, films, onDelete, onComplete, onReorder }) {
@@ -1082,21 +1125,330 @@ const OrderList = React.memo(function OrderList({ orders, jobs, films, onDelete,
 });
 
 const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, onComplete, onReorder, isFirst, isLast }) {
-    // ... (This component needs the up/down buttons)
+    const job = useMemo(() => jobs.find(j => j.id === order.jobId), [jobs, order.jobId]);
+    const [showHistory, setShowHistory] = useState(false);
+    const [history, setHistory] = useState([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    
+    const stockStatus = useMemo(() => calculateStockStatus(job, films), [job, films]);
+
+    const toggleHistory = useCallback(async () => {
+        if (!showHistory && job) {
+            setIsLoadingHistory(true);
+            const historyCollectionPath = `artifacts/${appId}/users/${order.ownerId}/jobs/${job.id}/consumedRolls`;
+            const q = query(collection(db, historyCollectionPath), orderBy("consumedAt", "desc"));
+            const querySnapshot = await getDocs(q);
+            setHistory(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            setIsLoadingHistory(false);
+        }
+        setShowHistory(prev => !prev);
+    }, [showHistory, job, db, order.ownerId]);
+
+    return (
+        <div className={`bg-gray-800 rounded-lg p-4 shadow-md border-l-4 ${order.status === 'completed' ? 'border-purple-500' : (stockStatus.ready ? 'border-green-500' : 'border-red-500')}`}>
+            <div className="flex justify-between items-start gap-4">
+                <div>
+                    <h3 className="font-bold text-xl text-white">{order.orderName}</h3>
+                    <p className="text-gray-400">Job: {order.jobName}</p>
+                    <div className="flex flex-wrap gap-x-4 text-sm text-gray-300 mt-1">
+                        {order.weightMade > 0 && <span>Weight: <span className="font-semibold">{order.weightMade} kg</span></span>}
+                        {order.metersMade > 0 && <span>Meters: <span className="font-semibold">{order.metersMade} m</span></span>}
+                    </div>
+                     <p className="text-xs text-gray-500 mt-1">Ordered: {toDDMMYYYY(order.createdAt?.toDate())}</p>
+                     {order.status === 'completed' && <p className="text-xs text-purple-400 mt-1">Completed: {toDDMMYYYY(order.completedAt?.toDate())}</p>}
+                </div>
+                <div className="flex flex-col items-end space-y-2 flex-shrink-0">
+                    <button onClick={() => onDelete(order)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
+                    {order.status === 'active' && onComplete && (
+                        <button onClick={() => onComplete(order)} className="flex items-center text-sm bg-green-600 hover:bg-green-700 text-white font-semibold py-1 px-3 rounded-lg">
+                            <CheckCircleIcon /><span className="ml-2">Mark Complete</span>
+                        </button>
+                    )}
+                    {order.status === 'active' && onReorder && (
+                        <div className="flex gap-2 items-center">
+                            <button onClick={() => onReorder(order, 'up')} disabled={isFirst} className="text-gray-400 disabled:opacity-30 enabled:hover:text-green-400"><ArrowUpIcon /></button>
+                            <button onClick={() => onReorder(order, 'down')} disabled={isLast} className="text-gray-400 disabled:opacity-30 enabled:hover:text-red-400"><ArrowDownIcon /></button>
+                        </div>
+                    )}
+                </div>
+            </div>
+            {job && (
+                <div className="mt-4 border-t border-gray-700 pt-3">
+                    <div className="flex justify-between items-center">
+                         <h4 className="font-semibold text-md mb-2 text-gray-300">Job Details & Stock Status</h4>
+                         <button onClick={toggleHistory} className="flex items-center text-sm text-cyan-400 hover:text-cyan-300"><HistoryIcon /><span className="ml-1">{showHistory ? 'Hide' : 'View'} History</span></button>
+                    </div>
+                    <div className="text-sm text-gray-400 mb-2 flex flex-wrap gap-x-4">
+                        <p>Job Size: <span className="font-semibold text-gray-200">{job.jobSize || 'N/A'}</span></p>
+                        {job.numberOfColors != null && <p>Colours: <span className="font-semibold text-gray-200">{job.numberOfColors}</span></p>}
+                        {job.printType && <p>Print Type: <span className="font-semibold text-gray-200">{job.printType.charAt(0).toUpperCase() + job.printType.slice(1)}</span></p>}
+                    </div>
+                    <div className="space-y-1">
+                        {stockStatus.details.map((detail, i) => (<div key={i} className="flex justify-between items-center text-sm"><span className="text-gray-300">{detail.name}</span>{detail.inStock ? <span className="font-semibold text-green-400">{detail.rollCount} rolls ({detail.totalWeight.toFixed(2)} kg)</span> : <span className="font-semibold text-red-400">Out of Stock</span>}</div>))}
+                    </div>
+                     {showHistory && (
+                         <div className="mt-4 border-t border-gray-600 pt-3">
+                             <h5 className="font-semibold text-cyan-400 mb-2">Consumed Roll History</h5>
+                             {isLoadingHistory ? <p className="text-sm text-gray-400">Loading history...</p> : (history.length > 0 ? <ul className="space-y-2 text-sm">{history.map(roll => (<li key={roll.id} className="p-2 bg-gray-700/50 rounded-md"><p className="font-semibold text-gray-200">{roll.filmType}</p><p className="text-gray-400">Consumed: {toDDMMYYYY(roll.consumedAt?.toDate())}</p></li>))}</ul> : <p className="text-sm text-gray-400">No rolls consumed for this job yet.</p>)}
+                         </div>
+                     )}
+                </div>
+            )}
+        </div>
+    );
 });
 
-
 const UseStock = React.memo(function UseStock({ films, jobs, db, userId, setView }) {
-    // ...
+    const [selectedJob, setSelectedJob] = useState(null);
+    const [jobSearch, setJobSearch] = useState('');
+    const [showJobResults, setShowJobResults] = useState(false);
+    const [selectedFilmType, setSelectedFilmType] = useState('');
+    const [selectedRoll, setSelectedRoll] = useState(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [dateOfUse, setDateOfUse] = useState(toYYYYMMDD(new Date()));
+    const jobSearchRef = useRef(null);
+    const [messageModal, setMessageModal] = useState({isOpen: false, title: '', body: ''});
+
+    useEffect(() => {
+        function handleClickOutside(event) { if (jobSearchRef.current && !jobSearchRef.current.contains(event.target)) { setShowJobResults(false); } }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [jobSearchRef]);
+
+    useEffect(() => {
+        if (selectedJob?.materials?.length > 0) {
+            const typesInStock = [...new Set(films.filter(f => f.currentWeight > 0 && selectedJob.materials.some(m => m.toLowerCase() === f.filmType.toLowerCase())).map(f => f.filmType))];
+            setSelectedFilmType(typesInStock.length === 1 ? typesInStock[0] : '');
+        } else { setSelectedFilmType(''); }
+        setSelectedRoll(null); 
+    }, [selectedJob, films]);
+
+    const handleUseRoll = useCallback(async () => {
+        if (!selectedRoll || !selectedJob || !db) { setMessageModal({isOpen: true, title: "Input Error", body: "A job and a film roll must be selected."}); return; }
+        setIsProcessing(true);
+        const batch = writeBatch(db);
+        const historyData = { filmType: selectedRoll.filmType, netWeight: selectedRoll.netWeight, supplier: selectedRoll.supplier, purchaseDate: selectedRoll.purchaseDate, createdAt: selectedRoll.createdAt, originalId: selectedRoll.id, consumedAt: new Date(dateOfUse + 'T00:00:00Z'), jobId: selectedJob.id, jobName: selectedJob.jobName, consumedBy: userId };
+        batch.set(doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${selectedJob.id}/consumedRolls`)), historyData);
+        batch.delete(doc(db, `artifacts/${appId}/users/${userId}/films`, selectedRoll.id));
+        try {
+            await batch.commit();
+            setMessageModal({isOpen: true, title: "Success", body: "Roll has been used and recorded in the job history."});
+            setView('jobs');
+        } catch (error) {
+            console.error("CRITICAL ERROR in handleUseRoll:", error);
+            setMessageModal({isOpen: true, title: "Database Error", body: `Failed to use roll. Please check console for details.`});
+        } finally { setIsProcessing(false); }
+    }, [selectedRoll, selectedJob, db, dateOfUse, userId, setView]);
+    
+    const filteredJobs = useMemo(() => jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : [], [jobs, jobSearch]);
+    const handleJobSelect = (job) => { setSelectedJob(job); setJobSearch(job.jobName); setShowJobResults(false); };
+    const availableFilmTypes = useMemo(() => {
+        const types = [...new Set(films.filter(f => f.currentWeight > 0).map(f => f.filmType))].sort();
+        if (selectedJob?.materials?.length > 0) return types.filter(t => selectedJob.materials.some(m => m.toLowerCase() === t.toLowerCase()));
+        return types;
+    }, [films, selectedJob]);
+    const availableRolls = useMemo(() => selectedFilmType ? films.filter(f => f.filmType === selectedFilmType && f.currentWeight > 0) : [], [films, selectedFilmType]);
+
+    return (
+        <section>
+             <MessageModal isOpen={messageModal.isOpen} onClose={() => setMessageModal({isOpen: false, title: '', body: ''})} title={messageModal.title}>{messageModal.body}</MessageModal>
+            <h2 className="text-2xl font-semibold text-gray-200 mb-6">Record Stock Usage</h2>
+            <div className="bg-gray-800 p-6 rounded-lg shadow-lg space-y-6">
+                <div ref={jobSearchRef}>
+                    <label className="block text-sm font-medium text-cyan-400 mb-2">1. Search and Select Job</label>
+                    <div className="relative">
+                        <input type="text" value={jobSearch} onChange={e => { setJobSearch(e.target.value); setShowJobResults(true);}} onFocus={() => setShowJobResults(true)} placeholder="Type to search for a job..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
+                    </div>
+                    {showJobResults && jobSearch && (
+                        <div className="absolute z-10 mt-1 w-full max-h-40 overflow-y-auto bg-gray-700 rounded-md border border-gray-600">
+                            {filteredJobs.length > 0 ? filteredJobs.map(job => (<div key={job.id} onClick={() => handleJobSelect(job)} className="p-2 cursor-pointer hover:bg-cyan-600">{job.jobName}</div>)) : <div className="p-2 text-gray-400">No jobs found.</div>}
+                        </div>
+                    )}
+                </div>
+                {selectedJob && (
+                    <div>
+                        <label className="block text-sm font-medium text-cyan-400 mb-2">2. Select Film Type (Filtered by Job)</label>
+                        <select value={selectedFilmType} onChange={e => { setSelectedFilmType(e.target.value); setSelectedRoll(null); }} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" >
+                            <option value="">-- Select a Film Type --</option>
+                            {availableFilmTypes.map(type => <option key={type} value={type}>{type}</option>)}
+                        </select>
+                    </div>
+                )}
+                {selectedFilmType && (
+                     <div className="border-t border-gray-700 pt-6 space-y-4">
+                        <h3 className="text-lg font-medium text-cyan-400 mb-2">3. Select a Roll to Use</h3>
+                         {availableRolls.length > 0 ? <div className="space-y-2 max-h-60 overflow-y-auto pr-2">{availableRolls.map(roll => (<button key={roll.id} onClick={() => setSelectedRoll(roll)} disabled={isProcessing} className={`w-full text-left p-3 rounded-md cursor-pointer transition-all ${selectedRoll?.id === roll.id ? 'bg-cyan-500 text-white shadow-lg' : 'bg-gray-700 hover:bg-gray-600'} disabled:opacity-50 disabled:cursor-wait`}><div className="font-bold">{roll.filmType}</div><div className="text-sm">Supplier: {roll.supplier} | Wt: {roll.currentWeight.toFixed(2)}kg</div><div className="text-xs text-gray-400">ID: {roll.id}</div></button>))}</div> : <p className="text-gray-500 pt-4 ">No rolls of type '{selectedFilmType}' currently in stock.</p>}
+                    </div>
+                )}
+                {selectedRoll && (
+                    <div className="border-t border-gray-700 pt-6 space-y-4">
+                        <h3 className="text-lg font-medium text-cyan-400">4. Confirm Usage</h3>
+                        <div>
+                            <p>Selected Job: <span className="font-semibold">{selectedJob.jobName}</span></p>
+                            <p>Selected Roll: <span className="font-bold">{selectedRoll.filmType}</span> from <span className="font-bold">{selectedRoll.supplier}</span></p>
+                        </div>
+                         <div>
+                            <label className="block text-sm font-medium text-cyan-400 mb-2">Date of Use</label>
+                            <input type="date" value={dateOfUse} onChange={(e) => setDateOfUse(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                        </div>
+                        <button onClick={handleUseRoll} disabled={isProcessing} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg disabled:bg-red-800 disabled:cursor-wait">{isProcessing ? 'Processing...' : 'Confirm & Use Selected Roll'}</button>
+                    </div>
+                )}
+            </div>
+        </section>
+    );
 });
 
 const FilmHistory = React.memo(function FilmHistory({ db, userId, jobs, setView, isPdfReady }) {
-    // ...
+    const [history, setHistory] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [historySearch, setHistorySearch] = useState('');
+    const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
+
+    useEffect(() => {
+        if (!db || !userId) { setIsLoading(false); return; }
+        setIsLoading(true);
+        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const combinedHistory = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
+            setHistory(combinedHistory);
+            setIsLoading(false);
+        }, (error) => { console.error("Error fetching global film history:", error); setIsLoading(false); });
+        return () => unsubscribe();
+    }, [db, userId]);
+
+    const handleRevertToStock = useCallback(async (historyEntry) => {
+        if (!db || !userId || !historyEntry) return;
+        const batch = writeBatch(db);
+        const filmRef = doc(db, `artifacts/${appId}/users/${userId}/films`, historyEntry.originalId);
+        const revertedFilmData = { filmType: historyEntry.filmType, netWeight: historyEntry.netWeight, currentWeight: historyEntry.netWeight, supplier: historyEntry.supplier, purchaseDate: historyEntry.purchaseDate, createdAt: historyEntry.createdAt };
+        batch.set(filmRef, revertedFilmData);
+        batch.delete(doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id));
+        try {
+            await batch.commit();
+            alert("Roll successfully reverted to stock.");
+            setEditingHistoryEntry(null);
+            setView('stock');
+        } catch (error) {
+            console.error("Error reverting roll to stock:", error);
+            alert("Failed to revert roll. Check console for details.");
+        }
+    }, [db, userId, setView]);
+
+    const handleUpdateHistory = useCallback(async (historyEntry, newDate, newJob) => {
+        if (!db || !userId || !historyEntry || !newJob) return;
+        if (newJob.id === historyEntry.jobId) {
+            const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            try { await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') }); setEditingHistoryEntry(null); }
+            catch (error) { console.error("Error updating history date:", error); alert("Failed to update date."); }
+        } else {
+            const batch = writeBatch(db);
+            const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
+            const newHistoryRef = doc(collection(db, `artifacts/${appId}/users/${userId}/jobs/${newJob.id}/consumedRolls`));
+            const { id, ...rest } = historyEntry;
+            const newData = { ...rest, jobId: newJob.id, jobName: newJob.jobName, consumedAt: new Date(newDate + 'T00:00:00Z') };
+            batch.set(newHistoryRef, newData);
+            batch.delete(oldHistoryRef);
+            try { await batch.commit(); setEditingHistoryEntry(null); }
+            catch (error) { console.error("Error moving history entry:", error); alert("Failed to move history entry."); }
+        }
+    }, [db, userId]);
+
+    const filteredHistory = useMemo(() => history.filter(item => {
+        const searchTerm = historySearch.toLowerCase();
+        return item.filmType?.toLowerCase().includes(searchTerm) || item.jobName?.toLowerCase().includes(searchTerm);
+    }), [history, historySearch]);
+
+    const handleExportHistoryPDF = useCallback(() => {
+        const title = "Global Film Usage History Report";
+        const head = [['Film Type', 'Used in Job', 'Date Used', 'Supplier', 'Original Wt. (kg)']];
+        const body = filteredHistory.map(item => [ item.filmType, item.jobName, toDDMMYYYY(item.consumedAt), item.supplier, item.netWeight?.toFixed(2)]);
+        const fileName = `film-history-report-${toYYYYMMDD(new Date())}.pdf`;
+        exportToPDF(title, head, body, fileName);
+    }, [filteredHistory]);
+
+    return(
+        <section>
+            <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                <h2 className="text-2xl font-semibold text-gray-200">Global Film Usage History</h2>
+                <div className="relative w-full md:w-1/2"><input type="text" value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Search by film or job name..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" /><div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div></div>
+                <button 
+                    onClick={handleExportHistoryPDF} 
+                    disabled={!isPdfReady}
+                    className={`flex items-center bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-200 hover:scale-105 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={!isPdfReady ? "PDF exporter is loading..." : "Export history to PDF"}
+                >
+                    <DownloadIcon /><span className="ml-2 hidden md:inline">Export PDF</span>
+                </button>
+            </div>
+            {isLoading ? <p>Loading history...</p> : (<div className="space-y-3">{filteredHistory.length > 0 ? filteredHistory.map(item => (<div key={item.id + item.jobId} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center"><div><p className="font-bold text-lg text-cyan-400">{item.filmType}</p><p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p><p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt)}</p><p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p></div><button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button></div>)) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}</div>)}
+            <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} />
+        </section>
+    );
 });
 
 const AdvancedEditHistoryModal = React.memo(function AdvancedEditHistoryModal({ isOpen, onClose, historyEntry, jobs, onUpdate, onRevert }) {
-    // ...
-});
+    const [consumedAt, setConsumedAt] = useState('');
+    const [selectedJobId, setSelectedJobId] = useState('');
+    const [showRevertConfirm, setShowRevertConfirm] = useState(false);
 
+    useEffect(() => {
+        if (historyEntry) {
+            setConsumedAt(toYYYYMMDD(historyEntry.consumedAt));
+            setSelectedJobId(historyEntry.jobId || '');
+            setShowRevertConfirm(false);
+        }
+    }, [historyEntry]);
+
+    if (!isOpen || !historyEntry) return null;
+
+    const handleUpdate = () => {
+        const job = jobs.find(j => j.id === selectedJobId);
+        if (!job) { alert("Please select a valid job."); return; }
+        onUpdate(historyEntry, consumedAt, job);
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-lg m-4">
+                <h3 className="text-xl font-bold text-cyan-400 mb-4">Edit History Entry</h3>
+                <div className="space-y-4">
+                    <p className="text-white bg-gray-700 p-3 rounded-md">Film: <strong className="font-semibold">{historyEntry.filmType}</strong></p>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Date of Use</label>
+                        <input type="date" value={consumedAt} onChange={(e) => setConsumedAt(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Used in Job</label>
+                        <select value={selectedJobId} onChange={(e) => setSelectedJobId(e.target.value)} className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none">
+                            <option value="" disabled>-- Select a Job --</option>
+                            {jobs.map(job => (<option key={job.id} value={job.id}>{job.jobName}</option>))}
+                        </select>
+                    </div>
+                </div>
+                <div className="mt-6 border-t border-gray-700 pt-4">
+                    <h4 className="text-lg font-semibold text-red-400">Danger Zone</h4>
+                    <div className="mt-2 p-3 bg-red-900/20 rounded-lg">
+                        {!showRevertConfirm ? (<button onClick={() => setShowRevertConfirm(true)} className="w-full text-left text-red-400 hover:text-red-300">Revert to Stock (Delete History Entry)...</button>) : (
+                            <div>
+                                <p className="text-white">This will delete the history entry and add the roll back to inventory. Are you sure?</p>
+                                <div className="flex gap-4 mt-3">
+                                    <button onClick={() => onRevert(historyEntry)} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg w-full">Yes, Revert</button>
+                                    <button onClick={() => setShowRevertConfirm(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full">Cancel</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+                <div className="flex justify-end mt-6 gap-4">
+                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Cancel</button>
+                    <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Update Entry</button>
+                </div>
+            </div>
+        </div>
+    );
+});
 
 export default App;
