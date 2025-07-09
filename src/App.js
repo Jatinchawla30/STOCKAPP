@@ -393,6 +393,8 @@ const Nav = React.memo(function Nav({ view, setView }) {
     );
 });
 
+// All components from here are now included in full, with performance optimizations.
+
 const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingFilm, setEditingFilm] = useState(null);
@@ -599,7 +601,7 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
 
     const handleEditJob = useCallback((job) => { setEditingJob(job); setShowForm(true); }, []);
     const closeJobForm = useCallback(() => { setShowForm(false); setEditingJob(null); }, []);
-    const closeDeleteModal = useCallback(() => { setJobToDelete(null); setIsDeleteModalOpen(false); }, []);
+    const closeDeleteModal = useCallback(() => { setIsDeleteModalOpen(false); setJobToDelete(null); }, []);
 
     const openDeleteModal = useCallback((job) => {
         const isJobInActiveOrder = orders.some(order => order.jobId === job.id && order.status === 'active');
