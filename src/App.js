@@ -303,9 +303,8 @@ const ConfirmationModal = React.memo(function ConfirmationModal({ isOpen, onClos
     );
 });
 
-// NEW: Updated modal to include notes
 const MarkCompleteModal = React.memo(function MarkCompleteModal({ isOpen, onClose, onConfirm, order }) {
-    const [completionDate, setCompletionDate] = useState(toYYYYMMDD(new Date()));
+    const [completionDate, setCompletionDate] = useState('');
     const [notes, setNotes] = useState('');
 
     useEffect(() => {
@@ -600,7 +599,7 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
 
     const handleEditJob = useCallback((job) => { setEditingJob(job); setShowForm(true); }, []);
     const closeJobForm = useCallback(() => { setShowForm(false); setEditingJob(null); }, []);
-    const closeDeleteModal = useCallback(() => { setJobToDelete(null); setDeleteModalOpen(false); }, []);
+    const closeDeleteModal = useCallback(() => { setJobToDelete(null); setIsDeleteModalOpen(false); }, []);
 
     const openDeleteModal = useCallback((job) => {
         const isJobInActiveOrder = orders.some(order => order.jobId === job.id && order.status === 'active');
@@ -609,7 +608,7 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
             setIsMessageModalOpen(true);
         } else {
             setJobToDelete(job);
-            setDeleteModalOpen(true);
+            setIsDeleteModalOpen(true);
         }
     }, [orders]);
 
