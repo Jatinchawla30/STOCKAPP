@@ -237,28 +237,28 @@ function App() {
         </div>
     );
 }
-// The rest of the file has been restored and includes performance optimizations.
+
 const LoginScreen = React.memo(function LoginScreen({ auth }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
 
+    // THIS IS THE FIX: The dependency array for useCallback now correctly includes
+    // email and password, so the function gets the latest values when you click login.
     const handleLogin = useCallback(async (e) => {
         e.preventDefault();
         setError('');
         try {
             await signInWithEmailAndPassword(auth, email, password);
         } catch (error) {
-            if (error.code === 'auth/api-key-not-valid') {
-                setError('Login failed: Invalid API Key. Please ensure your Firebase config is correct and check for API key restrictions in your Google Cloud Console.');
-            } else if (error.code === 'auth/operation-not-allowed') {
-                setError(`Login failed: Email/Password sign-in is not enabled for project ${firebaseConfig.projectId}. Please double-check the setting in your Firebase console.`);
+            if (error.code === 'auth/operation-not-allowed') {
+                setError(`Login failed: Email/Password sign-in is not enabled for project ${firebaseConfig.projectId}.`);
             } else {
                 setError('Failed to log in. Please check your email and password.');
             }
             console.error("Login Error:", error);
         }
-    }, [auth]);
+    }, [auth, email, password]);
 
     return (
         <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
@@ -287,6 +287,7 @@ const LoginScreen = React.memo(function LoginScreen({ auth }) {
     );
 });
 
+// --- MODAL AND HEADER COMPONENTS ---
 const ConfirmationModal = React.memo(function ConfirmationModal({ isOpen, onClose, onConfirm, title, children }) {
     if (!isOpen) return null;
     return (
@@ -306,6 +307,12 @@ const ConfirmationModal = React.memo(function ConfirmationModal({ isOpen, onClos
 
 const MarkCompleteModal = React.memo(function MarkCompleteModal({ isOpen, onClose, onConfirm, order }) {
     const [completionDate, setCompletionDate] = useState(toYYYYMMDD(new Date()));
+    useEffect(() => {
+        if(isOpen) {
+            setCompletionDate(toYYYYMMDD(new Date()));
+        }
+    }, [isOpen]);
+    
     if (!isOpen) return null;
     const handleConfirm = () => onConfirm(order.id, new Date(completionDate + 'T00:00:00Z'));
 
@@ -1132,7 +1139,7 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
     const stockStatus = useMemo(() => calculateStockStatus(job, films), [job, films]);
 
     const toggleHistory = useCallback(async () => {
-        if (!showHistory && job) {
+        if (!showHistory && job && db && userId) {
             setIsLoadingHistory(true);
             const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
             const q = query(collection(db, historyCollectionPath), orderBy("consumedAt", "desc"));
