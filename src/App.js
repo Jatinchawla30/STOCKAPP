@@ -237,7 +237,7 @@ function App() {
         </div>
     );
 }
-
+// The rest of the file has been restored and includes performance optimizations.
 const LoginScreen = React.memo(function LoginScreen({ auth }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -287,7 +287,6 @@ const LoginScreen = React.memo(function LoginScreen({ auth }) {
     );
 });
 
-// --- MODAL AND HEADER COMPONENTS ---
 const ConfirmationModal = React.memo(function ConfirmationModal({ isOpen, onClose, onConfirm, title, children }) {
     if (!isOpen) return null;
     return (
@@ -1052,14 +1051,14 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
             </ConfirmationModal>
 
             {viewType === 'active' ? (
-                <OrderList orders={activeOrders} jobs={jobs} films={films} onDelete={openDeleteModal} onComplete={handleOpenCompleteModal} onReorder={handleReorder} />
+                <OrderList orders={activeOrders} jobs={jobs} films={films} onDelete={openDeleteModal} onComplete={handleOpenCompleteModal} onReorder={handleReorder} db={db} userId={userId} />
             ) : (
                 <div>
                      <div className="relative mb-4">
                         <input type="text" value={completedSearch} onChange={e => setCompletedSearch(e.target.value)} placeholder="Search completed orders..." className="w-full bg-gray-700 p-2 pl-10 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none"/>
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><SearchIcon /></div>
                     </div>
-                    <OrderList orders={completedOrders} jobs={jobs} films={films} onDelete={openDeleteModal} />
+                    <OrderList orders={completedOrders} jobs={jobs} films={films} onDelete={openDeleteModal} db={db} userId={userId} />
                 </div>
             )}
         </section>
@@ -1119,12 +1118,12 @@ const OrderForm = React.memo(function OrderForm({ jobs, onSubmit, onCancel }) {
     );
 });
 
-const OrderList = React.memo(function OrderList({ orders, jobs, films, onDelete, onComplete, onReorder }) {
+const OrderList = React.memo(function OrderList({ orders, jobs, films, onDelete, onComplete, onReorder, db, userId }) {
     if (orders.length === 0) return <p className="text-center text-gray-500 py-8">No orders found.</p>;
-    return <div className="space-y-4">{orders.map((order, index) => <OrderCard key={order.id} order={order} jobs={jobs} films={films} onDelete={onDelete} onComplete={onComplete} onReorder={onReorder} isFirst={index === 0} isLast={index === orders.length - 1} />)}</div>;
+    return <div className="space-y-4">{orders.map((order, index) => <OrderCard key={order.id} order={order} jobs={jobs} films={films} onDelete={onDelete} onComplete={onComplete} onReorder={onReorder} isFirst={index === 0} isLast={index === orders.length - 1} db={db} userId={userId} />)}</div>;
 });
 
-const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, onComplete, onReorder, isFirst, isLast }) {
+const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, onComplete, onReorder, isFirst, isLast, db, userId }) {
     const job = useMemo(() => jobs.find(j => j.id === order.jobId), [jobs, order.jobId]);
     const [showHistory, setShowHistory] = useState(false);
     const [history, setHistory] = useState([]);
@@ -1135,14 +1134,14 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
     const toggleHistory = useCallback(async () => {
         if (!showHistory && job) {
             setIsLoadingHistory(true);
-            const historyCollectionPath = `artifacts/${appId}/users/${order.ownerId}/jobs/${job.id}/consumedRolls`;
+            const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
             const q = query(collection(db, historyCollectionPath), orderBy("consumedAt", "desc"));
             const querySnapshot = await getDocs(q);
             setHistory(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
             setIsLoadingHistory(false);
         }
         setShowHistory(prev => !prev);
-    }, [showHistory, job, db, order.ownerId]);
+    }, [showHistory, job, db, userId]);
 
     return (
         <div className={`bg-gray-800 rounded-lg p-4 shadow-md border-l-4 ${order.status === 'completed' ? 'border-purple-500' : (stockStatus.ready ? 'border-green-500' : 'border-red-500')}`}>
