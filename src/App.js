@@ -5,7 +5,6 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from
 
 // --- PDF Export Helper ---
 const exportToPDF = (title, head, body, fileName) => {
-    // This check is a failsafe for the script loading
     if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') {
         alert("PDF library is still loading. Please try again in a moment.");
         return;
@@ -401,7 +400,157 @@ const Nav = React.memo(function Nav({ view, setView }) {
     );
 });
 
-// The rest of the app's components, fully implemented and memoized.
+const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
+    const [history, setHistory] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        if (!db || !userId) {
+            setIsLoading(false);
+            return;
+        }
+        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const historyData = querySnapshot.docs.map(doc => doc.data());
+            setHistory(historyData);
+            setIsLoading(false);
+        }, (error) => {
+            console.error("Error fetching history for dashboard:", error);
+            setIsLoading(false);
+        });
+        return () => unsubscribe();
+    }, [db, userId]);
+
+    const analysis = useMemo(() => {
+        const totalRolls = films.length;
+        const totalWeight = films.reduce((sum, film) => sum + (film.currentWeight || 0), 0);
+
+        const filmTypes = films.reduce((acc, film) => {
+            const filmType = film.filmType || 'Uncategorized';
+            if (!acc[filmType]) {
+                acc[filmType] = { rolls: 0, weight: 0 };
+            }
+            acc[filmType].rolls += 1;
+            acc[filmType].weight += (film.currentWeight || 0);
+            return acc;
+        }, {});
+
+        const lowStockAlerts = Object.entries(filmTypes)
+            .filter(([, data]) => data.rolls <= 2)
+            .map(([type, data]) => ({ type, rolls: data.rolls }));
+
+        const consumption = history.reduce((acc, item) => {
+            const filmType = item.filmType || 'Uncategorized';
+            acc[filmType] = (acc[filmType] || 0) + 1;
+            return acc;
+        }, {});
+
+        const sortedConsumption = Object.entries(consumption).sort((a, b) => b[1] - a[1]);
+        const mostUsed = sortedConsumption.slice(0, 5);
+        const leastUsed = sortedConsumption.slice(-5).reverse();
+
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const fastMovers = new Set(history.filter(item => item.consumedAt?.toDate() > thirtyDaysAgo).map(item => item.filmType));
+        const slowMovers = Object.keys(filmTypes).filter(type => !fastMovers.has(type));
+
+        const breakdown = Object.entries(filmTypes).map(([type, data]) => ({
+            type,
+            percentage: totalWeight > 0 ? ((data.weight / totalWeight) * 100).toFixed(2) : 0
+        })).sort((a, b) => b.percentage - a.percentage);
+
+        const agingReport = films
+            .map(film => ({
+                ...film,
+                age: film.createdAt ? Math.floor((new Date() - film.createdAt.toDate()) / (1000 * 60 * 60 * 24)) : 0
+            }))
+            .sort((a, b) => b.age - a.age);
+
+        return { totalRolls, totalWeight, lowStockAlerts, mostUsed, leastUsed, fastMovers: [...fastMovers], slowMovers, breakdown, agingReport };
+    }, [films, history]);
+
+    if (isLoading) {
+        return <p>Loading dashboard data...</p>;
+    }
+
+    return (
+        <section className="space-y-8">
+            <h2 className="text-3xl font-bold text-cyan-400">Dashboard</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-gray-800 p-6 rounded-lg col-span-1">
+                    <h3 className="text-xl font-semibold text-gray-200 mb-4">Stock Overview</h3>
+                    <div className="space-y-2">
+                        <p className="text-lg">Total Rolls: <span className="font-bold text-cyan-400">{analysis.totalRolls}</span></p>
+                        <p className="text-lg">Total Weight: <span className="font-bold text-cyan-400">{analysis.totalWeight.toFixed(2)} kg</span></p>
+                    </div>
+                </div>
+                <div className="bg-gray-800 p-6 rounded-lg col-span-1 md:col-span-2">
+                    <h3 className="text-xl font-semibold text-red-500 mb-4">Low Stock Alerts (2 or Fewer Rolls)</h3>
+                    {analysis.lowStockAlerts.length > 0 ? (
+                        <ul className="space-y-1">
+                            {analysis.lowStockAlerts.map(item => (
+                                <li key={item.type} className="flex justify-between">
+                                    <span>{item.type}</span>
+                                    <span className="font-bold">{item.rolls} roll(s)</span>
+                                </li>
+                            ))}
+                        </ul>
+                    ) : <p className="text-gray-400">No items are low on stock.</p>}
+                </div>
+            </div>
+
+            <div className="bg-gray-800 p-6 rounded-lg">
+                <h3 className="text-xl font-semibold text-gray-200 mb-4">Consumption Analysis</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <h4 className="font-semibold text-cyan-400 mb-2">Most Used (By Rolls)</h4>
+                        {analysis.mostUsed.length > 0 ? <ul className="space-y-1">{analysis.mostUsed.map(([type, count]) => <li key={type}>{type} ({count} times)</li>)}</ul> : <p className="text-sm text-gray-400">No consumption data yet.</p>}
+                    </div>
+                    <div>
+                        <h4 className="font-semibold text-cyan-400 mb-2">Least Used (By Rolls)</h4>
+                        {analysis.leastUsed.length > 0 ? <ul className="space-y-1">{analysis.leastUsed.map(([type, count]) => <li key={type}>{type} ({count} times)</li>)}</ul> : <p className="text-sm text-gray-400">No consumption data yet.</p>}
+                    </div>
+                    <div>
+                        <h4 className="font-semibold text-cyan-400 mb-2">Fast Movers (Used in last 30 days)</h4>
+                        {analysis.fastMovers.length > 0 ? <ul className="space-y-1">{analysis.fastMovers.map(type => <li key={type}>{type}</li>)}</ul> : <p className="text-sm text-gray-400">No items used recently.</p>}
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h3 className="text-xl font-semibold text-gray-200 mb-4">Inventory Breakdown by Weight</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-700"><tr><th className="p-2">Film Type</th><th className="p-2">% of Total Stock</th></tr></thead>
+                            <tbody>
+                                {analysis.breakdown.map(item => (
+                                    <tr key={item.type} className="border-b border-gray-700"><td className="p-2">{item.type}</td><td className="p-2">{item.percentage}%</td></tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h3 className="text-xl font-semibold text-gray-200 mb-4">Inventory Aging Report</h3>
+                    <div className="overflow-x-auto max-h-96">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Film Type</th><th className="p-2">Days in Stock</th></tr></thead>
+                            <tbody>
+                                {analysis.agingReport.map(item => (
+                                    <tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.filmType}</td><td className="p-2">{item.age}</td></tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+    );
+});
+
 const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingFilm, setEditingFilm] = useState(null);
