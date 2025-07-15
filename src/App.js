@@ -115,7 +115,7 @@ function App() {
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [isAuthReady, setIsAuthReady] = useState(false);
-    const [view, setView] = useState('stock');
+    const [view, setView] = useState('dashboard'); // NEW: Default to dashboard
     const [films, setFilms] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [orders, setOrders] = useState([]);
@@ -232,6 +232,7 @@ function App() {
                 <Nav view={view} setView={setView} />
                  <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Logout</button>
                 <main className="mt-8">
+                    {view === 'dashboard' && <Dashboard films={films} db={db} userId={user.uid} />}
                     {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
                     {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} isPdfReady={isPdfReady} />}
                     {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
@@ -381,6 +382,7 @@ const NavButton = React.memo(function NavButton({ text, isActive, onClick }) {
 });
 
 const Nav = React.memo(function Nav({ view, setView }) {
+    const setViewDashboard = useCallback(() => setView('dashboard'), [setView]);
     const setViewStock = useCallback(() => setView('stock'), [setView]);
     const setViewJobs = useCallback(() => setView('jobs'), [setView]);
     const setViewOrders = useCallback(() => setView('orders'), [setView]);
@@ -389,6 +391,7 @@ const Nav = React.memo(function Nav({ view, setView }) {
 
     return (
         <nav className="flex flex-wrap space-x-2 md:space-x-4 border-b border-gray-700 pb-2">
+            <NavButton text="Dashboard" isActive={view === 'dashboard'} onClick={setViewDashboard} />
             <NavButton text="Stock Inventory" isActive={view === 'stock'} onClick={setViewStock} />
             <NavButton text="Job Management" isActive={view === 'jobs'} onClick={setViewJobs} />
             <NavButton text="Orders" isActive={view === 'orders'} onClick={setViewOrders} />
@@ -398,6 +401,7 @@ const Nav = React.memo(function Nav({ view, setView }) {
     );
 });
 
+// The rest of the app's components, fully implemented and memoized.
 const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingFilm, setEditingFilm] = useState(null);
