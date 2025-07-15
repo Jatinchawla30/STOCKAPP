@@ -5,6 +5,7 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from
 
 // --- PDF Export Helper ---
 const exportToPDF = (title, head, body, fileName) => {
+    // This check is a failsafe for the script loading
     if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') {
         alert("PDF library is still loading. Please try again in a moment.");
         return;
@@ -114,7 +115,7 @@ function App() {
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [isAuthReady, setIsAuthReady] = useState(false);
-    const [view, setView] = useState('dashboard'); // NEW: Default to dashboard
+    const [view, setView] = useState('dashboard'); // Default to dashboard
     const [films, setFilms] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [orders, setOrders] = useState([]);
@@ -437,7 +438,7 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
 
         const lowStockAlerts = Object.entries(filmTypes)
             .filter(([, data]) => data.rolls <= 2)
-            .map(([type, data]) => ({ type, rolls: data.rolls }));
+            .map(([type, data]) => ({ type, rolls: data.rolls, weight: data.weight }));
 
         const consumption = history.reduce((acc, item) => {
             const filmType = item.filmType || 'Uncategorized';
@@ -462,7 +463,7 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
         const agingReport = films
             .map(film => ({
                 ...film,
-                age: film.createdAt ? Math.floor((new Date() - film.createdAt.toDate()) / (1000 * 60 * 60 * 24)) : 0
+                age: film.purchaseDate ? Math.floor((new Date() - film.purchaseDate.toDate()) / (1000 * 60 * 60 * 24)) : 0
             }))
             .sort((a, b) => b.age - a.age);
 
@@ -492,7 +493,7 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
                             {analysis.lowStockAlerts.map(item => (
                                 <li key={item.type} className="flex justify-between">
                                     <span>{item.type}</span>
-                                    <span className="font-bold">{item.rolls} roll(s)</span>
+                                    <span className="font-bold">{item.rolls} roll(s) - {item.weight.toFixed(2)} kg</span>
                                 </li>
                             ))}
                         </ul>
