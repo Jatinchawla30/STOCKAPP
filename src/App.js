@@ -86,6 +86,7 @@ const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className
 const ArrowUpIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" /></svg>;
 const ArrowDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" /></svg>;
 const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg>;
+const LightBulbIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
 
 
 // Reusable helper function to calculate stock status for a job.
@@ -232,7 +233,7 @@ function App() {
                 <Nav view={view} setView={setView} />
                  <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Logout</button>
                 <main className="mt-8">
-                    {view === 'dashboard' && <Dashboard films={films} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
+                    {view === 'dashboard' && <Dashboard films={films} orders={orders} jobs={jobs} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
                     {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
                     {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} isPdfReady={isPdfReady} />}
                     {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
@@ -401,10 +402,10 @@ const Nav = React.memo(function Nav({ view, setView }) {
     );
 });
 
-const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady }) {
+const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userId, isPdfReady }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [detailedView, setDetailedView] = useState(null);
+    const [detailedView, setDetailedView] = useState(null); // null, 'low_stock', 'aging', 'suggestion'
 
     useEffect(() => {
         if (!db || !userId) {
@@ -441,6 +442,41 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady 
             .filter(([, data]) => data.rolls <= 2)
             .map(([type, data]) => ({ type, rolls: data.rolls, weight: data.weight }));
 
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+        
+        const consumption = history
+            .filter(item => item.consumedAt.toDate() > oneYearAgo)
+            .reduce((acc, item) => {
+                const filmType = item.filmType || 'Uncategorized';
+                acc[filmType] = (acc[filmType] || 0) + 1;
+                return acc;
+            }, {});
+
+        const monthlyConsumption = Object.entries(consumption).reduce((acc, [type, count]) => {
+            acc[type] = count / 12;
+            return acc;
+        }, {});
+
+        const activeOrderDemand = orders
+            .filter(o => o.status === 'active')
+            .flatMap(o => jobs.find(j => j.id === o.jobId)?.materials || [])
+            .reduce((acc, material) => {
+                acc[material] = (acc[material] || 0) + 1;
+                return acc;
+            }, {});
+
+        const purchaseSuggestions = Object.keys(filmTypes).map(type => {
+            const currentStock = filmTypes[type].weight;
+            const avgMonthlyUse = (monthlyConsumption[type] || 0) * (films.find(f=>f.filmType === type)?.netWeight || 200); // Approximate weight
+            const immediateNeed = (activeOrderDemand[type] || 0) * (films.find(f=>f.filmType === type)?.netWeight || 200);
+            
+            // Suggest ordering if current stock is less than 1.5 months of use + immediate need
+            const suggestedQty = Math.max(0, (avgMonthlyUse * 1.5) + immediateNeed - currentStock);
+            
+            return { type, currentStock, avgMonthlyUse, immediateNeed, suggestedQty: Math.ceil(suggestedQty / 100) * 100 };
+        }).filter(s => s.suggestedQty > 0).sort((a,b) => b.suggestedQty - a.suggestedQty);
+
         const agingReport = films
             .map(film => ({
                 ...film,
@@ -448,8 +484,8 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady 
             }))
             .sort((a, b) => b.age - a.age);
 
-        return { totalRolls, totalWeight, lowStockAlerts, agingReport };
-    }, [films, history]);
+        return { totalRolls, totalWeight, lowStockAlerts, purchaseSuggestions, agingReport };
+    }, [films, history, orders, jobs]);
     
     const handleExport = useCallback((type) => {
         if (type === 'low_stock') {
@@ -460,6 +496,10 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady 
             const head = [['Film Type', 'Supplier', 'Purchase Date', 'Days in Stock']];
             const body = analysis.agingReport.map(item => [item.filmType, item.supplier, toDDMMYYYY(item.purchaseDate), `${item.age} days`]);
             exportToPDF('Inventory Aging Report', head, body, `aging-report-${toYYYYMMDD(new Date())}.pdf`);
+        } else if (type === 'suggestion') {
+            const head = [['Material', 'Current Stock (kg)', 'Avg Monthly Use (kg)', 'Immediate Need (kg)', 'Suggested Reorder (kg)']];
+            const body = analysis.purchaseSuggestions.map(item => [item.type, item.currentStock.toFixed(2), item.avgMonthlyUse.toFixed(2), item.immediateNeed.toFixed(2), item.suggestedQty]);
+            exportToPDF('Purchase Order Suggestions', head, body, `po-suggestion-${toYYYYMMDD(new Date())}.pdf`);
         }
     }, [analysis]);
 
@@ -485,6 +525,20 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady 
                         <div className="overflow-x-auto max-h-96"><table className="w-full text-left"><thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Film Type</th><th className="p-2">Supplier</th><th className="p-2">Purchase Date</th><th className="p-2">Days in Stock</th></tr></thead><tbody>{analysis.agingReport.map(item => (<tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.filmType}</td><td className="p-2">{item.supplier}</td><td className="p-2">{toDDMMYYYY(item.purchaseDate)}</td><td className="p-2">{item.age} days</td></tr>))}</tbody></table></div>
                     </div>
                  );
+             case 'suggestion':
+                return (
+                    <div className="bg-gray-800 p-6 rounded-lg">
+                         <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-semibold text-gray-200">Purchase Order Suggestions</h3>
+                            <button onClick={() => handleExport('suggestion')} disabled={!isPdfReady} className={`flex items-center text-sm py-1 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}><DownloadIcon/><span className="ml-2">Export</span></button>
+                        </div>
+                        <p className="text-sm text-gray-400 mb-4">Based on past year's usage and active orders.</p>
+                        <div className="overflow-x-auto max-h-96"><table className="w-full text-left">
+                            <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Material</th><th className="p-2">Current Stock</th><th className="p-2">Suggested Reorder</th></tr></thead>
+                            <tbody>{analysis.purchaseSuggestions.map(item => (<tr key={item.type} className="border-b border-gray-700"><td className="p-2 font-bold text-cyan-400">{item.type}</td><td className="p-2">{item.currentStock.toFixed(2)} kg</td><td className="p-2 font-semibold text-green-400">{item.suggestedQty} kg</td></tr>))}</tbody>
+                        </table></div>
+                    </div>
+                );
             default:
                 return null;
         }
@@ -498,7 +552,7 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady 
         <section className="space-y-8">
             <h2 className="text-3xl font-bold text-cyan-400">Dashboard</h2>
             
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-gray-800 p-6 rounded-lg text-center">
                     <h3 className="text-lg font-semibold text-gray-200 mb-2">Total Stock</h3>
                     <p className="text-3xl font-bold text-cyan-400">{analysis.totalRolls}</p>
@@ -514,6 +568,13 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady 
                     <h3 className="text-lg font-semibold text-gray-200 mb-2">Inventory Aging</h3>
                     <p className="text-3xl font-bold text-yellow-400">{analysis.agingReport.length > 0 ? analysis.agingReport[0].age : 0}</p>
                     <p className="text-sm text-gray-400">Oldest Item (Days)</p>
+                </div>
+                 <div className="bg-gray-800 p-6 rounded-lg text-center hover:bg-gray-700 cursor-pointer" onClick={() => setDetailedView('suggestion')}>
+                    <h3 className="text-lg font-semibold text-gray-200 mb-2">PO Suggestions</h3>
+                     <div className="flex justify-center items-center h-full">
+                        <LightBulbIcon />
+                        <span className="text-2xl font-bold ml-2 text-green-400">{analysis.purchaseSuggestions.length}</span>
+                    </div>
                 </div>
             </div>
 
@@ -745,6 +806,8 @@ const CategoryAnalysis = React.memo(function CategoryAnalysis({ categoryName, fi
         </section>
     )
 });
+
+// ... (All other components are included below for completeness)
 
 const FilmForm = React.memo(function FilmForm({ onSubmit, onCancel, initialData }) {
     const [formData, setFormData] = useState({ filmType: '', netWeight: '', supplier: '', purchaseDate: toYYYYMMDD(new Date()) });
@@ -1447,7 +1510,7 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
                 <div className="flex flex-col items-end space-y-2 flex-shrink-0">
                     <button onClick={() => onDelete(order)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
                     {order.status === 'active' && onComplete && (
-                        <button onClick={() => onComplete(order)} className="flex items-center text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded-lg">
+                        <button onClick={() => onComplete(order)} className="flex items-center text-sm bg-green-600 hover:bg-green-700 text-white font-semibold py-1 px-3 rounded-lg">
                             <CheckCircleIcon /><span className="ml-2">Mark Complete</span>
                         </button>
                     )}
