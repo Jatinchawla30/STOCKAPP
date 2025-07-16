@@ -85,6 +85,7 @@ const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className=
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 const ArrowUpIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" /></svg>;
 const ArrowDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" /></svg>;
+const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg>;
 
 
 // Reusable helper function to calculate stock status for a job.
@@ -114,7 +115,7 @@ function App() {
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [isAuthReady, setIsAuthReady] = useState(false);
-    const [view, setView] = useState('dashboard'); // NEW: Default to dashboard
+    const [view, setView] = useState('dashboard'); // Default to dashboard
     const [films, setFilms] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [orders, setOrders] = useState([]);
@@ -231,7 +232,7 @@ function App() {
                 <Nav view={view} setView={setView} />
                  <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Logout</button>
                 <main className="mt-8">
-                    {view === 'dashboard' && <Dashboard films={films} db={db} userId={user.uid} />}
+                    {view === 'dashboard' && <Dashboard films={films} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
                     {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
                     {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} isPdfReady={isPdfReady} />}
                     {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
@@ -400,10 +401,10 @@ const Nav = React.memo(function Nav({ view, setView }) {
     );
 });
 
-const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
+const Dashboard = React.memo(function Dashboard({ films, db, userId, isPdfReady }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [detailedView, setDetailedView] = useState(null); // null, 'low_stock', 'consumption', 'aging'
+    const [detailedView, setDetailedView] = useState(null);
 
     useEffect(() => {
         if (!db || !userId) {
@@ -440,26 +441,6 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
             .filter(([, data]) => data.rolls <= 2)
             .map(([type, data]) => ({ type, rolls: data.rolls, weight: data.weight }));
 
-        const consumption = history.reduce((acc, item) => {
-            const filmType = item.filmType || 'Uncategorized';
-            acc[filmType] = (acc[filmType] || 0) + 1;
-            return acc;
-        }, {});
-
-        const sortedConsumption = Object.entries(consumption).sort((a, b) => b[1] - a[1]);
-        const mostUsed = sortedConsumption.slice(0, 5);
-        const leastUsed = sortedConsumption.slice(-5).reverse();
-
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const fastMovers = new Set(history.filter(item => item.consumedAt?.toDate() > thirtyDaysAgo).map(item => item.filmType));
-        const slowMovers = Object.keys(filmTypes).filter(type => !fastMovers.has(type));
-
-        const breakdown = Object.entries(filmTypes).map(([type, data]) => ({
-            type,
-            percentage: totalWeight > 0 ? ((data.weight / totalWeight) * 100).toFixed(2) : 0
-        })).sort((a, b) => b.percentage - a.percentage);
-
         const agingReport = films
             .map(film => ({
                 ...film,
@@ -467,17 +448,43 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
             }))
             .sort((a, b) => b.age - a.age);
 
-        return { totalRolls, totalWeight, lowStockAlerts, mostUsed, leastUsed, fastMovers: [...fastMovers], slowMovers, breakdown, agingReport };
+        return { totalRolls, totalWeight, lowStockAlerts, agingReport };
     }, [films, history]);
     
+    const handleExport = useCallback((type) => {
+        if (type === 'low_stock') {
+            const head = [['Film Type', 'Rolls Left', 'Total Weight (kg)']];
+            const body = analysis.lowStockAlerts.map(item => [item.type, item.rolls, item.weight.toFixed(2)]);
+            exportToPDF('Low Stock Report', head, body, `low-stock-report-${toYYYYMMDD(new Date())}.pdf`);
+        } else if (type === 'aging') {
+            const head = [['Film Type', 'Supplier', 'Purchase Date', 'Days in Stock']];
+            const body = analysis.agingReport.map(item => [item.filmType, item.supplier, toDDMMYYYY(item.purchaseDate), `${item.age} days`]);
+            exportToPDF('Inventory Aging Report', head, body, `aging-report-${toYYYYMMDD(new Date())}.pdf`);
+        }
+    }, [analysis]);
+
     const renderDetailedView = () => {
         switch (detailedView) {
             case 'low_stock':
-                return <div className="bg-gray-800 p-6 rounded-lg"><h3 className="text-xl font-semibold text-red-500 mb-4">Low Stock Alerts</h3>{analysis.lowStockAlerts.length > 0 ? <ul className="space-y-1">{analysis.lowStockAlerts.map(item => <li key={item.type} className="flex justify-between"><span>{item.type}</span><span className="font-bold">{item.rolls} roll(s) - {item.weight.toFixed(2)} kg</span></li>)}</ul> : <p>No items low on stock.</p>}</div>;
-            case 'consumption':
-                return <div className="bg-gray-800 p-6 rounded-lg"><h3 className="text-xl font-semibold text-gray-200 mb-4">Consumption Analysis</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-6"><div><h4 className="font-semibold text-cyan-400 mb-2">Most Used</h4>{analysis.mostUsed.map(([type, count]) => <li key={type}>{type} ({count} times)</li>)}</div><div><h4 className="font-semibold text-cyan-400 mb-2">Least Used</h4>{analysis.leastUsed.map(([type, count]) => <li key={type}>{type} ({count} times)</li>)}</div></div></div>;
+                return (
+                    <div className="bg-gray-800 p-6 rounded-lg">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-semibold text-red-500">Low Stock Alerts</h3>
+                            <button onClick={() => handleExport('low_stock')} disabled={!isPdfReady} className={`flex items-center text-sm py-1 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}><DownloadIcon/><span className="ml-2">Export</span></button>
+                        </div>
+                        {analysis.lowStockAlerts.length > 0 ? <ul className="space-y-1">{analysis.lowStockAlerts.map(item => <li key={item.type} className="flex justify-between p-2 bg-gray-700/50 rounded-md"><span>{item.type}</span><span className="font-bold">{item.rolls} roll(s) - {item.weight.toFixed(2)} kg</span></li>)}</ul> : <p>No items low on stock.</p>}
+                    </div>
+                );
             case 'aging':
-                return <div className="bg-gray-800 p-6 rounded-lg"><h3 className="text-xl font-semibold text-gray-200 mb-4">Inventory Aging Report</h3><div className="overflow-x-auto max-h-96"><table className="w-full text-left"><thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Film Type</th><th className="p-2">Supplier</th><th className="p-2">Purchase Date</th><th className="p-2">Days in Stock</th></tr></thead><tbody>{analysis.agingReport.map(item => (<tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.filmType}</td><td className="p-2">{item.supplier}</td><td className="p-2">{toDDMMYYYY(item.purchaseDate)}</td><td className="p-2">{item.age} days</td></tr>))}</tbody></table></div></div>;
+                 return (
+                    <div className="bg-gray-800 p-6 rounded-lg">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-semibold text-gray-200">Inventory Aging Report</h3>
+                             <button onClick={() => handleExport('aging')} disabled={!isPdfReady} className={`flex items-center text-sm py-1 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}><DownloadIcon/><span className="ml-2">Export</span></button>
+                        </div>
+                        <div className="overflow-x-auto max-h-96"><table className="w-full text-left"><thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Film Type</th><th className="p-2">Supplier</th><th className="p-2">Purchase Date</th><th className="p-2">Days in Stock</th></tr></thead><tbody>{analysis.agingReport.map(item => (<tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.filmType}</td><td className="p-2">{item.supplier}</td><td className="p-2">{toDDMMYYYY(item.purchaseDate)}</td><td className="p-2">{item.age} days</td></tr>))}</tbody></table></div>
+                    </div>
+                 );
             default:
                 return null;
         }
@@ -512,9 +519,9 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
 
             {detailedView && (
                 <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4" onClick={() => setDetailedView(null)}>
-                    <div className="w-full max-w-4xl bg-gray-800 rounded-lg shadow-xl" onClick={e => e.stopPropagation()}>
+                    <div className="w-full max-w-4xl" onClick={e => e.stopPropagation()}>
                         <div className="p-6 relative">
-                            <button onClick={() => setDetailedView(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white"><XIcon/></button>
+                            <button onClick={() => setDetailedView(null)} className="absolute top-4 right-4 text-gray-400 hover:text-white z-10"><XIcon/></button>
                             {renderDetailedView()}
                         </div>
                     </div>
@@ -523,6 +530,7 @@ const Dashboard = React.memo(function Dashboard({ films, db, userId }) {
         </section>
     );
 });
+
 
 const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
@@ -662,6 +670,82 @@ const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isP
     );
 });
 
+const CategoryAnalysis = React.memo(function CategoryAnalysis({ categoryName, films, onBack, db, userId }) {
+    const [history, setHistory] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        if (!db || !userId || !categoryName) {
+            setIsLoading(false);
+            return;
+        }
+        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId), where('filmType', '==', categoryName));
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const historyData = querySnapshot.docs.map(doc => doc.data());
+            setHistory(historyData);
+            setIsLoading(false);
+        }, (error) => {
+            console.error("Error fetching category history:", error);
+            setIsLoading(false);
+        });
+        return () => unsubscribe();
+    }, [db, userId, categoryName]);
+
+    const totalWeight = useMemo(() => films.reduce((sum, film) => sum + (film.currentWeight || 0), 0), [films]);
+    const agingReport = useMemo(() => films.map(film => ({
+        ...film,
+        age: film.purchaseDate ? Math.floor((new Date() - film.purchaseDate.toDate()) / (1000 * 60 * 60 * 24)) : 0
+    })).sort((a,b) => b.age - a.age), [films]);
+
+    return (
+        <section>
+            <button onClick={onBack} className="flex items-center mb-4 text-cyan-400 hover:text-cyan-300"><ChevronLeftIcon /> Back to All Categories</button>
+            <h2 className="text-3xl font-bold text-cyan-400 mb-6">Analysis for: <span className="text-white">{categoryName}</span></h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h3 className="text-xl font-semibold mb-2">Current Stock</h3>
+                    <p>Total Rolls: <span className="font-bold text-cyan-400">{films.length}</span></p>
+                    <p>Total Weight: <span className="font-bold text-cyan-400">{totalWeight.toFixed(2)} kg</span></p>
+                </div>
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h3 className="text-xl font-semibold mb-2">Consumption</h3>
+                    <p>Total Rolls Used All-Time: <span className="font-bold text-cyan-400">{history.length}</span></p>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-gray-800 p-6 rounded-lg">
+                    <h3 className="text-xl font-semibold mb-4">Stock On Hand (Oldest First)</h3>
+                     <div className="overflow-x-auto max-h-96">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Supplier</th><th className="p-2">Weight (kg)</th><th className="p-2">Days in Stock</th></tr></thead>
+                            <tbody>
+                                {agingReport.sort((a,b) => a.age - b.age).map((item) => <tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.supplier}</td><td className="p-2">{item.currentWeight.toFixed(2)}</td><td className="p-2">{item.age}</td></tr>)}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                 <div className="bg-gray-800 p-6 rounded-lg">
+                    <h3 className="text-xl font-semibold mb-4">Consumption History</h3>
+                    {isLoading ? <p>Loading history...</p> : (
+                        history.length > 0 ? (
+                            <div className="overflow-x-auto max-h-96">
+                                <table className="w-full text-left">
+                                    <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Job Name</th><th className="p-2">Date Consumed</th></tr></thead>
+                                    <tbody>
+                                        {history.sort((a,b) => b.consumedAt.toDate() - a.consumedAt.toDate()).map((item, index) => <tr key={index} className="border-b border-gray-700"><td className="p-2">{item.jobName}</td><td className="p-2">{toDDMMYYYY(item.consumedAt)}</td></tr>)}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : <p className="text-gray-400">No consumption history for this item.</p>
+                    )}
+                </div>
+            </div>
+        </section>
+    )
+});
+
 const FilmForm = React.memo(function FilmForm({ onSubmit, onCancel, initialData }) {
     const [formData, setFormData] = useState({ filmType: '', netWeight: '', supplier: '', purchaseDate: toYYYYMMDD(new Date()) });
 
@@ -691,7 +775,7 @@ const FilmForm = React.memo(function FilmForm({ onSubmit, onCancel, initialData 
                 <input name="filmType" value={formData.filmType} onChange={handleChange} placeholder="Film Type (e.g., 12*610 PET)" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
                 <input name="netWeight" type="number" step="0.01" value={formData.netWeight} onChange={handleChange} placeholder="Net Weight (kg)" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
                 <input name="supplier" value={formData.supplier} onChange={handleChange} placeholder="Supplier" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <input name="purchaseDate" type="date" value={formData.purchaseDate} onChange={handleChange} required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <input name="purchaseDate" type="date" value={formData.purchaseDate} onChange={handleChange} required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
                 <div className="flex items-center space-x-4 md:col-span-2">
                     <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">{initialData ? 'Update Roll' : 'Add Roll'}</button>
                     <button type="button" onClick={onCancel} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">Cancel</button>
@@ -724,65 +808,6 @@ const CategoryList = React.memo(function CategoryList({ categories, onSelectCate
     );
 });
 
-const CategoryAnalysis = React.memo(function CategoryAnalysis({ categoryName, films, onBack, db, userId }) {
-    const [history, setHistory] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-
-    useEffect(() => {
-        if (!db || !userId || !categoryName) {
-            setIsLoading(false);
-            return;
-        }
-        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId), where('filmType', '==', categoryName));
-        const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const historyData = querySnapshot.docs.map(doc => doc.data());
-            setHistory(historyData);
-            setIsLoading(false);
-        }, (error) => {
-            console.error("Error fetching category history:", error);
-            setIsLoading(false);
-        });
-        return () => unsubscribe();
-    }, [db, userId, categoryName]);
-
-    const totalWeight = useMemo(() => films.reduce((sum, film) => sum + (film.currentWeight || 0), 0), [films]);
-
-    return (
-        <section>
-            <button onClick={onBack} className="flex items-center mb-4 text-cyan-400 hover:text-cyan-300"><ChevronLeftIcon /> Back to All Categories</button>
-            <h2 className="text-3xl font-bold text-cyan-400 mb-6">Analysis for: <span className="text-white">{categoryName}</span></h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <div className="bg-gray-800 p-6 rounded-lg">
-                    <h3 className="text-xl font-semibold mb-2">Current Stock</h3>
-                    <p>Total Rolls: <span className="font-bold text-cyan-400">{films.length}</span></p>
-                    <p>Total Weight: <span className="font-bold text-cyan-400">{totalWeight.toFixed(2)} kg</span></p>
-                </div>
-                <div className="bg-gray-800 p-6 rounded-lg">
-                    <h3 className="text-xl font-semibold mb-2">Consumption</h3>
-                    <p>Total Rolls Used: <span className="font-bold text-cyan-400">{history.length}</span></p>
-                </div>
-            </div>
-
-            <div className="bg-gray-800 p-6 rounded-lg">
-                <h3 className="text-xl font-semibold mb-4">Consumption History</h3>
-                {isLoading ? <p>Loading history...</p> : (
-                    history.length > 0 ? (
-                        <div className="overflow-x-auto max-h-96">
-                            <table className="w-full text-left">
-                                <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Job Name</th><th className="p-2">Date Consumed</th></tr></thead>
-                                <tbody>
-                                    {history.map((item, index) => <tr key={index} className="border-b border-gray-700"><td className="p-2">{item.jobName}</td><td className="p-2">{toDDMMYYYY(item.consumedAt)}</td></tr>)}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : <p className="text-gray-400">No consumption history for this item.</p>
-                )}
-            </div>
-        </section>
-    )
-});
-
 const FilmList = React.memo(function FilmList({ films, onEdit, onDelete }) {
     return (
         <div className="overflow-x-auto bg-gray-800 rounded-lg shadow-md">
@@ -805,8 +830,6 @@ const FilmList = React.memo(function FilmList({ films, onEdit, onDelete }) {
     );
 });
 
-// ... The rest of the components remain the same as the previous full, correct version.
-// All of them have been included below for completeness.
 const JobManagement = React.memo(function JobManagement({ films, jobs, orders, db, userId, setView, isPdfReady }) {
     const [showForm, setShowForm] = useState(false);
     const [editingJob, setEditingJob] = useState(null);
@@ -1424,7 +1447,7 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
                 <div className="flex flex-col items-end space-y-2 flex-shrink-0">
                     <button onClick={() => onDelete(order)} className="text-gray-500 hover:text-red-500"><TrashIcon/></button>
                     {order.status === 'active' && onComplete && (
-                        <button onClick={() => onComplete(order)} className="flex items-center text-sm bg-green-600 hover:bg-green-700 text-white font-semibold py-1 px-3 rounded-lg">
+                        <button onClick={() => onComplete(order)} className="flex items-center text-sm bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded-lg">
                             <CheckCircleIcon /><span className="ml-2">Mark Complete</span>
                         </button>
                     )}
