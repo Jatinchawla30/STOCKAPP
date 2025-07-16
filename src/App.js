@@ -86,7 +86,6 @@ const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className
 const ArrowUpIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" /></svg>;
 const ArrowDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" /></svg>;
 const LightBulbIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>;
-const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg>;
 
 
 // Reusable helper function to calculate stock status for a job.
@@ -194,7 +193,7 @@ function App() {
         }, (error) => console.error("Error fetching jobs:", error));
 
         const ordersPath = `artifacts/${appId}/users/${user.uid}/orders`;
-        const qOrders = query(collection(db, ordersPath)); // No initial sort, will be sorted by planningIndex later
+        const qOrders = query(collection(db, ordersPath));
         const unsubscribeOrders = onSnapshot(qOrders, (snapshot) => {
             setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => console.error("Error fetching orders:", error));
@@ -428,7 +427,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
         const totalRolls = films.length;
         const totalWeight = films.reduce((sum, film) => sum + (film.currentWeight || 0), 0);
 
-        const filmTypes = films.reduce((acc, film) => {
+        const filmTypesInStock = films.reduce((acc, film) => {
             const filmType = film.filmType || 'Uncategorized';
             if (!acc[filmType]) {
                 acc[filmType] = { rolls: 0, weight: 0 };
@@ -438,9 +437,19 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
             return acc;
         }, {});
 
-        const lowStockAlerts = Object.entries(filmTypes)
-            .filter(([, data]) => data.rolls <= 2)
-            .map(([type, data]) => ({ type, rolls: data.rolls, weight: data.weight }));
+        const allKnownFilmTypes = new Set([
+            ...films.map(f => f.filmType),
+            ...jobs.flatMap(j => j.materials || [])
+        ]);
+
+        const filmData = Array.from(allKnownFilmTypes).map(type => {
+            const stockInfo = filmTypesInStock[type] || { rolls: 0, weight: 0 };
+            return { type, ...stockInfo };
+        });
+
+        const lowStockAlerts = filmData
+            .filter(data => data.rolls <= 2)
+            .map(item => ({ type: item.type, rolls: item.rolls, weight: item.weight }));
 
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -468,11 +477,9 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
                 acc[material] = (acc[material] || 0) + weight;
                 return acc;
             }, {});
-        
-        const allMaterialTypes = new Set([...Object.keys(filmTypes), ...Object.keys(monthlyConsumption), ...Object.keys(activeOrderDemand)]);
 
-        const purchaseSuggestions = Array.from(allMaterialTypes).map(type => {
-            const currentStock = filmTypes[type]?.weight || 0;
+        const purchaseSuggestions = Array.from(allKnownFilmTypes).map(type => {
+            const currentStock = filmTypesInStock[type]?.weight || 0;
             const avgMonthlyUse = monthlyConsumption[type] || 0;
             const immediateNeed = activeOrderDemand[type] || 0;
             
@@ -539,7 +546,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
                         <p className="text-sm text-gray-400 mb-4">Based on past year's usage and active orders.</p>
                         <div className="overflow-x-auto max-h-96"><table className="w-full text-left">
                             <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Material</th><th className="p-2">Current Stock</th><th className="p-2">Suggested Reorder</th></tr></thead>
-                            <tbody>{analysis.purchaseSuggestions.map(item => (<tr key={item.type} className="border-b border-gray-700"><td className="p-2 font-bold text-cyan-400">{item.type}</td><td className="p-2">{item.currentStock.toFixed(2)} kg</td><td className="p-2 font-semibold text-green-400">{item.suggestedQty} kg</td></tr>))}</tbody>
+                            <tbody>{analysis.purchaseSuggestions.length > 0 ? analysis.purchaseSuggestions.map(item => (<tr key={item.type} className="border-b border-gray-700"><td className="p-2 font-bold text-cyan-400">{item.type}</td><td className="p-2">{item.currentStock.toFixed(2)} kg</td><td className="p-2 font-semibold text-green-400">{item.suggestedQty} kg</td></tr>)) : <tr><td colSpan="3" className="text-center p-4">No purchase suggestions at this time.</td></tr>}</tbody>
                         </table></div>
                     </div>
                 );
