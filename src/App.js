@@ -85,7 +85,6 @@ const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className=
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 const ArrowUpIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" /></svg>;
 const ArrowDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" /></svg>;
-const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg>;
 const LightBulbIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
 
 
@@ -116,7 +115,7 @@ function App() {
     const [db, setDb] = useState(null);
     const [auth, setAuth] = useState(null);
     const [isAuthReady, setIsAuthReady] = useState(false);
-    const [view, setView] = useState('dashboard'); // Default to dashboard
+    const [view, setView] = useState('dashboard'); // NEW: Default to dashboard
     const [films, setFilms] = useState([]);
     const [jobs, setJobs] = useState([]);
     const [orders, setOrders] = useState([]);
@@ -245,6 +244,7 @@ function App() {
     );
 }
 
+// All other components are included below for completeness.
 const LoginScreen = React.memo(function LoginScreen({ auth }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -405,7 +405,7 @@ const Nav = React.memo(function Nav({ view, setView }) {
 const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userId, isPdfReady }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [detailedView, setDetailedView] = useState(null); // null, 'low_stock', 'aging', 'suggestion'
+    const [detailedView, setDetailedView] = useState(null);
 
     useEffect(() => {
         if (!db || !userId) {
@@ -446,35 +446,37 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
         
         const consumption = history
-            .filter(item => item.consumedAt.toDate() > oneYearAgo)
+            .filter(item => item.consumedAt?.toDate() > oneYearAgo)
             .reduce((acc, item) => {
                 const filmType = item.filmType || 'Uncategorized';
-                acc[filmType] = (acc[filmType] || 0) + 1;
+                acc[filmType] = (acc[filmType] || 0) + (item.netWeight || 0);
                 return acc;
             }, {});
 
-        const monthlyConsumption = Object.entries(consumption).reduce((acc, [type, count]) => {
-            acc[type] = count / 12;
+        const monthlyConsumption = Object.entries(consumption).reduce((acc, [type, totalWeightUsed]) => {
+            acc[type] = totalWeightUsed / 12;
             return acc;
         }, {});
 
         const activeOrderDemand = orders
             .filter(o => o.status === 'active')
-            .flatMap(o => jobs.find(j => j.id === o.jobId)?.materials || [])
-            .reduce((acc, material) => {
-                acc[material] = (acc[material] || 0) + 1;
+            .flatMap(o => {
+                const job = jobs.find(j => j.id === o.jobId);
+                return job?.materials.map(material => ({ material, weight: o.weightMade })) || [];
+            })
+            .reduce((acc, { material, weight }) => {
+                acc[material] = (acc[material] || 0) + weight;
                 return acc;
             }, {});
 
         const purchaseSuggestions = Object.keys(filmTypes).map(type => {
             const currentStock = filmTypes[type].weight;
-            const avgMonthlyUse = (monthlyConsumption[type] || 0) * (films.find(f=>f.filmType === type)?.netWeight || 200); // Approximate weight
-            const immediateNeed = (activeOrderDemand[type] || 0) * (films.find(f=>f.filmType === type)?.netWeight || 200);
+            const avgMonthlyUse = monthlyConsumption[type] || 0;
+            const immediateNeed = activeOrderDemand[type] || 0;
             
-            // Suggest ordering if current stock is less than 1.5 months of use + immediate need
             const suggestedQty = Math.max(0, (avgMonthlyUse * 1.5) + immediateNeed - currentStock);
             
-            return { type, currentStock, avgMonthlyUse, immediateNeed, suggestedQty: Math.ceil(suggestedQty / 100) * 100 };
+            return { type, currentStock, avgMonthlyUse, immediateNeed, suggestedQty: suggestedQty > 0 ? Math.ceil(suggestedQty / 50) * 50 : 0 };
         }).filter(s => s.suggestedQty > 0).sort((a,b) => b.suggestedQty - a.suggestedQty);
 
         const agingReport = films
@@ -807,7 +809,7 @@ const CategoryAnalysis = React.memo(function CategoryAnalysis({ categoryName, fi
     )
 });
 
-// ... (All other components are included below for completeness)
+// ... All other components are included below ...
 
 const FilmForm = React.memo(function FilmForm({ onSubmit, onCancel, initialData }) {
     const [formData, setFormData] = useState({ filmType: '', netWeight: '', supplier: '', purchaseDate: toYYYYMMDD(new Date()) });
@@ -837,7 +839,7 @@ const FilmForm = React.memo(function FilmForm({ onSubmit, onCancel, initialData 
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <input name="filmType" value={formData.filmType} onChange={handleChange} placeholder="Film Type (e.g., 12*610 PET)" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
                 <input name="netWeight" type="number" step="0.01" value={formData.netWeight} onChange={handleChange} placeholder="Net Weight (kg)" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
-                <input name="supplier" value={formData.supplier} onChange={handleChange} placeholder="Supplier" required className="bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
+                <input name="supplier" value={formData.supplier} onChange={handleChange} placeholder="Supplier" required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
                 <input name="purchaseDate" type="date" value={formData.purchaseDate} onChange={handleChange} required className="w-full bg-gray-700 p-2 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none" />
                 <div className="flex items-center space-x-4 md:col-span-2">
                     <button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full transition-colors">{initialData ? 'Update Roll' : 'Add Roll'}</button>
