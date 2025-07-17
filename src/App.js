@@ -7,7 +7,6 @@ import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from
 // --- PDF Export Helper ---
 // This function handles the generation of PDF reports using the jspdf and jspdf-autotable libraries.
 const exportToPDF = (title, head, body, fileName, showNotification) => {
-    // Check if the PDF generation libraries are loaded
     if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') {
         if(showNotification) showNotification('PDF library is still loading. Please try again in a moment.', 'error');
         console.error("PDF library (jspdf) is not loaded.");
@@ -15,7 +14,6 @@ const exportToPDF = (title, head, body, fileName, showNotification) => {
     }
     try {
         const doc = new window.jspdf.jsPDF();
-        // Sanitize body content to ensure all values are strings to prevent errors
         const sanitizedBody = body.map(row =>
             row.map(cell => String(cell === null || cell === undefined ? 'N/A' : cell))
         );
@@ -31,7 +29,6 @@ const exportToPDF = (title, head, body, fileName, showNotification) => {
 };
 
 // --- Firebase Configuration & App ID ---
-// These will be populated by the platform's environment variables.
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
@@ -39,7 +36,6 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
     if (!date) return '';
-    // Handle both Firebase Timestamps and JS Date objects
     const d = date.toDate ? date.toDate() : new Date(date);
     if (isNaN(d.getTime())) return '';
     const year = d.getFullYear();
@@ -51,10 +47,8 @@ const toYYYYMMDD = (date) => {
 const toDDMMYYYY = (date) => {
     if (!date) return 'N/A';
     try {
-        // Handle both Firebase Timestamps and JS Date objects
         const d = date.toDate ? date.toDate() : new Date(date);
         if (isNaN(d.getTime())) {
-             // Fallback for string dates
              const parsed = new Date(date);
              if(isNaN(parsed.getTime())) return 'Invalid Date';
              const day = (`0${parsed.getDate()}`).slice(-2);
@@ -274,7 +268,11 @@ const LoginScreen = React.memo(function LoginScreen({ auth }) {
         try {
             await signInWithEmailAndPassword(auth, email, password);
         } catch (error) {
-            setError('Failed to log in. Please check your email and password.');
+            if (error.code === 'auth/operation-not-allowed') {
+                 setError(`Login failed: Email/Password sign-in is not enabled for project ${firebaseConfig.projectId}.`);
+            } else {
+                 setError('Failed to log in. Please check your email and password.');
+            }
             console.error("Login Error:", error);
         }
     }, [auth, email, password]);
