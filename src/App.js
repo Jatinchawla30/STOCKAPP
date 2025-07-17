@@ -1,8 +1,8 @@
-/* global __firebase_config, __app_id, __initial_auth_token */
+/* global __firebase_config, __app_id */
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setLogLevel, serverTimestamp } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signOut } from 'firebase/auth';
+import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, orderBy, where, setLogLevel, serverTimestamp } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // --- PDF Export Helper ---
 // This function handles the generation of PDF reports using the jspdf and jspdf-autotable libraries.
@@ -83,6 +83,7 @@ const ClipboardListIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" classNa
 const DownloadIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>);
 const XIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>);
 const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>);
+const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-cyan-400 mb-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>);
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 const ArrowUpIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" /></svg>;
 const ArrowDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" /></svg>;
@@ -165,7 +166,7 @@ function App() {
     useEffect(() => {
         if (Object.keys(firebaseConfig).length === 0) {
             console.error("Firebase config is missing.");
-            setIsAuthReady(true); // Allow UI to render an error state if needed
+            setIsAuthReady(true);
             return;
         }
         setLogLevel('debug');
@@ -175,20 +176,8 @@ function App() {
         setDb(firestore);
         setAuth(authInstance);
 
-        const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
-            if (user) {
-                setUser(user);
-            } else {
-                 try {
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await signInWithCustomToken(authInstance, __initial_auth_token);
-                    } else {
-                        await signInAnonymously(authInstance);
-                    }
-                } catch (error) {
-                    console.error("Auth Error:", error);
-                }
-            }
+        const unsubscribe = onAuthStateChanged(authInstance, (user) => {
+            setUser(user);
             setIsAuthReady(true);
         });
         
@@ -242,14 +231,18 @@ function App() {
         if(auth) signOut(auth).catch(err => console.error("Logout failed:", err));
     };
     
-    if (!isAuthReady || isLoading) {
-        return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">{!isAuthReady ? "Initializing..." : "Loading Inventory..."}</p></div></div>;
+    if (!isAuthReady) {
+        return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Initializing...</p></div></div>;
     }
 
     if (!user) {
-         return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><ExclamationIcon /><p className="mt-2 text-lg">Authentication Failed. Please refresh.</p></div></div>;
+        return <LoginScreen auth={auth} />;
     }
     
+    if (isLoading) {
+        return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Loading Inventory...</p></div></div>;
+    }
+
     return (
         <div className="bg-gray-900 min-h-screen font-sans text-white">
             <div className="container mx-auto p-4 md:p-8 relative">
@@ -269,6 +262,49 @@ function App() {
         </div>
     );
 }
+
+const LoginScreen = React.memo(function LoginScreen({ auth }) {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleLogin = useCallback(async (e) => {
+        e.preventDefault();
+        setError('');
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+        } catch (error) {
+            setError('Failed to log in. Please check your email and password.');
+            console.error("Login Error:", error);
+        }
+    }, [auth, email, password]);
+
+    return (
+        <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
+            <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
+                <div className="flex flex-col items-center">
+                    <LockClosedIcon />
+                    <h1 className="text-3xl font-bold text-cyan-400 mb-2">Login</h1>
+                    <p className="text-gray-400 mb-6">Please enter your credentials</p>
+                </div>
+                <form onSubmit={handleLogin} className="space-y-6">
+                    <div>
+                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" autoComplete="email"
+                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                    </div>
+                    <div>
+                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password"
+                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
+                    </div>
+                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                    <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-md transition-transform duration-200 hover:scale-105">
+                        Login
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+});
 
 
 // --- NOTIFICATION & MODAL COMPONENTS ---
@@ -367,7 +403,7 @@ const Header = React.memo(function Header({ user }) {
         <header className="mb-8 text-center md:text-left">
             <h2 className="text-2xl font-semibold text-gray-300">SHRI GURUNANAK INDUSTRIES</h2>
             <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
-            {user && (<div className="mt-2 text-xs text-yellow-300"><p>User ID: {user.uid}</p></div>)}
+            {user && (<div className="mt-2 text-xs text-yellow-300"><p>Logged in as: {user.email || user.uid}</p></div>)}
             <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
         </header>
     );
