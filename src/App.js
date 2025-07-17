@@ -1,4 +1,3 @@
-/* global __firebase_config, __app_id */
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setLogLevel, serverTimestamp } from 'firebase/firestore';
@@ -28,9 +27,16 @@ const exportToPDF = (title, head, body, fileName, showNotification) => {
     }
 };
 
-// --- Firebase Configuration & App ID ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// --- Firebase Configuration ---
+const firebaseConfig = {
+    apiKey: "AIzaSyCMKc3d6o_pz82JUsQoNivQP28Yx8edrPg",
+    authDomain: "stock-manager-v2.firebaseapp.com",
+    projectId: "stock-manager-v2",
+    storageBucket: "stock-manager-v2.appspot.com",
+    messagingSenderId: "1076558999625",
+    appId: "1:1076558999625:web:027444deb458b1711f8f98"
+};
+const appId = "stock-manager-v2";
 
 
 // --- DATE HELPER FUNCTIONS ---
@@ -158,11 +164,6 @@ function App() {
 
     // Effect for initializing Firebase and handling authentication
     useEffect(() => {
-        if (Object.keys(firebaseConfig).length === 0) {
-            console.error("Firebase config is missing.");
-            setIsAuthReady(true);
-            return;
-        }
         setLogLevel('debug');
         const app = initializeApp(firebaseConfig);
         const firestore = getFirestore(app);
