@@ -245,7 +245,6 @@ function App() {
     );
 }
 
-// All other components are included below for completeness.
 const LoginScreen = React.memo(function LoginScreen({ auth }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -438,14 +437,17 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
             acc[filmType].weight += (film.currentWeight || 0);
             return acc;
         }, {});
-
+        
         const allKnownFilmTypes = new Set([
             ...films.map(f => f.filmType),
             ...jobs.flatMap(j => j.materials || [])
         ]);
 
         const lowStockAlerts = Array.from(allKnownFilmTypes)
-            .map(type => filmTypesInStock[type] || { type, rolls: 0, weight: 0 })
+            .map(type => {
+                const stockData = filmTypesInStock[type] || { rolls: 0, weight: 0 };
+                return { type, ...stockData };
+            })
             .filter(data => data.rolls <= 2);
 
         const oneYearAgo = new Date();
@@ -455,7 +457,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
             .filter(item => item.consumedAt?.toDate() > oneYearAgo)
             .reduce((acc, item) => {
                 const filmType = item.filmType || 'Uncategorized';
-                acc[filmType] = (acc[filmType] || 0) + 1;
+                acc[filmType] = (acc[filmType] || 0) + 1; // Count rolls consumed
                 return acc;
             }, {});
 
@@ -466,7 +468,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
                 acc[material] = (acc[material] || 0) + 1;
                 return acc;
             }, {});
-
+            
         const purchaseSuggestions = Array.from(allKnownFilmTypes).map(type => {
             const stockData = filmTypesInStock[type] || { rolls: 0, weight: 0 };
             const isLowStock = stockData.rolls <= 2;
@@ -480,7 +482,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
 
             return {
                 type,
-                availableStock: `${stockData.rolls} rolls (${stockData.weight.toFixed(2)} kg)`,
+                availableStock: `${stockData.rolls} roll(s) (${stockData.weight.toFixed(2)} kg)`,
                 urgencyScore: Math.min(100, Math.ceil(urgencyScore)),
             };
         }).filter(item => item.urgencyScore > 0)
@@ -502,8 +504,8 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
             const body = analysis.lowStockAlerts.map(item => [item.type, item.rolls, item.weight.toFixed(2)]);
             exportToPDF('Low Stock Report', head, body, `low-stock-report-${toYYYYMMDD(new Date())}.pdf`);
         } else if (type === 'aging') {
-            const head = [['Film Type', 'Supplier', 'Purchase Date', 'Days in Stock']];
-            const body = analysis.agingReport.map(item => [item.filmType, item.supplier, toDDMMYYYY(item.purchaseDate), `${item.age} days`]);
+            const head = [['Film Type', 'Supplier', 'Net Wt.', 'Current Wt.', 'Purchase Date', 'Days in Stock']];
+            const body = analysis.agingReport.map(item => [item.filmType, item.supplier, item.netWeight, item.currentWeight.toFixed(2) ,toDDMMYYYY(item.purchaseDate), `${item.age} days`]);
             exportToPDF('Inventory Aging Report', head, body, `aging-report-${toYYYYMMDD(new Date())}.pdf`);
         } else if (type === 'suggestion') {
             const head = [['Material', 'Available Stock', 'Urgency Score']];
@@ -531,7 +533,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
                             <h3 className="text-xl font-semibold text-gray-200">Inventory Aging Report</h3>
                              <button onClick={() => handleExport('aging')} disabled={!isPdfReady} className={`flex items-center text-sm py-1 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}><DownloadIcon/><span className="ml-2">Export</span></button>
                         </div>
-                        <div className="overflow-x-auto max-h-96"><table className="w-full text-left"><thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Film Type</th><th className="p-2">Supplier</th><th className="p-2">Purchase Date</th><th className="p-2">Days in Stock</th></tr></thead><tbody>{analysis.agingReport.map(item => (<tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.filmType}</td><td className="p-2">{item.supplier}</td><td className="p-2">{toDDMMYYYY(item.purchaseDate)}</td><td className="p-2">{item.age} days</td></tr>))}</tbody></table></div>
+                        <div className="overflow-x-auto max-h-96"><table className="w-full text-left"><thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Film Type</th><th className="p-2">Net Wt.</th><th className="p-2">Current Wt.</th><th className="p-2">Purchase Date</th><th className="p-2">Days in Stock</th></tr></thead><tbody>{analysis.agingReport.map(item => (<tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.filmType}</td><td className="p-2">{item.netWeight.toFixed(2)} kg</td><td className="p-2">{item.currentWeight.toFixed(2)} kg</td><td className="p-2">{toDDMMYYYY(item.purchaseDate)}</td><td className="p-2">{item.age} days</td></tr>))}</tbody></table></div>
                     </div>
                  );
              case 'suggestion':
@@ -541,7 +543,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
                             <h3 className="text-xl font-semibold text-gray-200">Purchase Order Suggestions</h3>
                             <button onClick={() => handleExport('suggestion')} disabled={!isPdfReady} className={`flex items-center text-sm py-1 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}><DownloadIcon/><span className="ml-2">Export</span></button>
                         </div>
-                        <p className="text-sm text-gray-400 mb-4">Based on past year's usage and active orders.</p>
+                        <p className="text-sm text-gray-400 mb-4">Based on historical usage, active orders, and low stock levels.</p>
                         <div className="overflow-x-auto max-h-96"><table className="w-full text-left">
                             <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Material</th><th className="p-2">Available Stock</th><th className="p-2">Urgency Score</th></tr></thead>
                             <tbody>{analysis.purchaseSuggestions.length > 0 ? analysis.purchaseSuggestions.map(item => (<tr key={item.type} className="border-b border-gray-700"><td className="p-2 font-bold text-cyan-400">{item.type}</td><td className="p-2">{item.availableStock}</td><td className="p-2 font-semibold text-green-400">{item.urgencyScore}%</td></tr>)) : <tr><td colSpan="3" className="text-center p-4">No purchase suggestions at this time.</td></tr>}</tbody>
