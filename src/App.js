@@ -1,16 +1,20 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, writeBatch, getDocs, collectionGroup, orderBy, where, setLogLevel, serverTimestamp } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signOut } from 'firebase/auth';
 
 // --- PDF Export Helper ---
-const exportToPDF = (title, head, body, fileName) => {
+// This function handles the generation of PDF reports using the jspdf and jspdf-autotable libraries.
+const exportToPDF = (title, head, body, fileName, showNotification) => {
+    // Check if the PDF generation libraries are loaded
     if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') {
-        alert("PDF library is still loading. Please try again in a moment.");
+        if(showNotification) showNotification('PDF library is still loading. Please try again in a moment.', 'error');
+        console.error("PDF library (jspdf) is not loaded.");
         return;
     }
     try {
         const doc = new window.jspdf.jsPDF();
+        // Sanitize body content to ensure all values are strings to prevent errors
         const sanitizedBody = body.map(row =>
             row.map(cell => String(cell === null || cell === undefined ? 'N/A' : cell))
         );
@@ -20,26 +24,21 @@ const exportToPDF = (title, head, body, fileName) => {
         doc.autoTable({ startY: 30, head: head, body: sanitizedBody });
         doc.save(fileName);
     } catch (error) {
-        alert("An unexpected error occurred while generating the PDF. See the console for details.");
+        if(showNotification) showNotification('An unexpected error occurred while generating the PDF.', 'error');
         console.error("PDF Generation Error:", error);
     }
 };
 
+// --- Firebase Configuration & App ID ---
+// These will be populated by the platform's environment variables.
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// --- Firebase Configuration ---
-const firebaseConfig = {
-    apiKey: "AIzaSyCMKc3d6o_pz82JUsQoNivQP28Yx8edrPg",
-    authDomain: "stock-manager-v2.firebaseapp.com",
-    projectId: "stock-manager-v2",
-    storageBucket: "stock-manager-v2.appspot.com",
-    messagingSenderId: "1076558999625",
-    appId: "1:1076558999625:web:027444deb458b1711f8f98"
-};
-const appId = "stock-manager-v2";
 
 // --- DATE HELPER FUNCTIONS ---
 const toYYYYMMDD = (date) => {
     if (!date) return '';
+    // Handle both Firebase Timestamps and JS Date objects
     const d = date.toDate ? date.toDate() : new Date(date);
     if (isNaN(d.getTime())) return '';
     const year = d.getFullYear();
@@ -51,8 +50,10 @@ const toYYYYMMDD = (date) => {
 const toDDMMYYYY = (date) => {
     if (!date) return 'N/A';
     try {
+        // Handle both Firebase Timestamps and JS Date objects
         const d = date.toDate ? date.toDate() : new Date(date);
         if (isNaN(d.getTime())) {
+             // Fallback for string dates
              const parsed = new Date(date);
              if(isNaN(parsed.getTime())) return 'Invalid Date';
              const day = (`0${parsed.getDate()}`).slice(-2);
@@ -81,13 +82,10 @@ const ClipboardListIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" classNa
 const DownloadIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>);
 const XIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>);
 const ExclamationIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>);
-const LockClosedIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-cyan-400 mb-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>);
 const CheckCircleIcon = () => (<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>);
 const ArrowUpIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" /></svg>;
 const ArrowDownIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" /></svg>;
 const LightBulbIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>;
-const ChartBarIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg>;
-
 
 // Reusable helper function to calculate stock status for a job.
 const calculateStockStatus = (job, films) => {
@@ -96,7 +94,8 @@ const calculateStockStatus = (job, films) => {
     }
     let ready = true;
     const details = job.materials.map(material => {
-        const matchingFilms = films.filter(f => f.filmType.toLowerCase() === material.toLowerCase() && f.currentWeight > 0);
+        const materialLowerCase = material.toLowerCase();
+        const matchingFilms = films.filter(f => f.filmType.toLowerCase() === materialLowerCase && f.currentWeight > 0);
         const inStock = matchingFilms.length > 0;
         if (!inStock) ready = false;
         return {
@@ -122,6 +121,15 @@ function App() {
     const [orders, setOrders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isPdfReady, setIsPdfReady] = useState(false);
+    const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
+
+    // Function to display notifications
+    const showNotification = (message, type = 'success') => {
+        setNotification({ show: true, message, type });
+        setTimeout(() => {
+            setNotification({ show: false, message: '', type: 'success' });
+        }, 4000);
+    };
 
     // Effect to reliably load PDF scripts sequentially.
     useEffect(() => {
@@ -154,6 +162,11 @@ function App() {
 
     // Effect for initializing Firebase and handling authentication
     useEffect(() => {
+        if (Object.keys(firebaseConfig).length === 0) {
+            console.error("Firebase config is missing.");
+            setIsAuthReady(true); // Allow UI to render an error state if needed
+            return;
+        }
         setLogLevel('debug');
         const app = initializeApp(firebaseConfig);
         const firestore = getFirestore(app);
@@ -161,8 +174,20 @@ function App() {
         setDb(firestore);
         setAuth(authInstance);
 
-        const unsubscribe = onAuthStateChanged(authInstance, (user) => {
-            setUser(user);
+        const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
+            if (user) {
+                setUser(user);
+            } else {
+                 try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(authInstance, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(authInstance);
+                    }
+                } catch (error) {
+                    console.error("Auth Error:", error);
+                }
+            }
             setIsAuthReady(true);
         });
         
@@ -180,25 +205,27 @@ function App() {
         }
 
         setIsLoading(true);
+        const userId = user.uid;
 
-        const filmsPath = `artifacts/${appId}/users/${user.uid}/films`;
+        const filmsPath = `artifacts/${appId}/users/${userId}/films`;
         const qFilms = query(collection(db, filmsPath));
         const unsubscribeFilms = onSnapshot(qFilms, (snapshot) => {
             setFilms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => console.error("Error fetching films:", error));
 
-        const jobsPath = `artifacts/${appId}/users/${user.uid}/jobs`;
+        const jobsPath = `artifacts/${appId}/users/${userId}/jobs`;
         const qJobs = query(collection(db, jobsPath), orderBy("createdAt", "desc"));
         const unsubscribeJobs = onSnapshot(qJobs, (snapshot) => {
             setJobs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => console.error("Error fetching jobs:", error));
 
-        const ordersPath = `artifacts/${appId}/users/${user.uid}/orders`;
+        const ordersPath = `artifacts/${appId}/users/${userId}/orders`;
         const qOrders = query(collection(db, ordersPath));
         const unsubscribeOrders = onSnapshot(qOrders, (snapshot) => {
             setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         }, (error) => console.error("Error fetching orders:", error));
 
+        // Initial load check
         Promise.all([
             getDocs(qFilms), getDocs(qJobs), getDocs(qOrders)
         ]).catch(console.error).finally(() => setIsLoading(false));
@@ -211,19 +238,15 @@ function App() {
     }, [isAuthReady, db, user]);
 
     const handleLogout = () => {
-        if(auth) signOut(auth);
+        if(auth) signOut(auth).catch(err => console.error("Logout failed:", err));
     };
     
-    if (!isAuthReady) {
-        return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Initializing...</p></div></div>;
+    if (!isAuthReady || isLoading) {
+        return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">{!isAuthReady ? "Initializing..." : "Loading Inventory..."}</p></div></div>;
     }
 
     if (!user) {
-        return <LoginScreen auth={auth} />;
-    }
-    
-    if (isLoading) {
-        return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><PackageIcon /><p className="mt-2 text-lg">Loading Inventory...</p></div></div>;
+         return <div className="flex items-center justify-center h-screen bg-gray-900 text-white"><div className="flex flex-col items-center"><ExclamationIcon /><p className="mt-2 text-lg">Authentication Failed. Please refresh.</p></div></div>;
     }
     
     return (
@@ -231,68 +254,41 @@ function App() {
             <div className="container mx-auto p-4 md:p-8 relative">
                 <Header user={user} />
                 <Nav view={view} setView={setView} />
-                 <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Logout</button>
+                <button onClick={handleLogout} className="absolute top-4 right-4 bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">Logout</button>
                 <main className="mt-8">
-                    {view === 'dashboard' && <Dashboard films={films} orders={orders} jobs={jobs} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
-                    {view === 'stock' && <FilmInventory films={films} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
-                    {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} isPdfReady={isPdfReady} />}
-                    {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} isPdfReady={isPdfReady} />}
-                    {view === 'use_stock' && <UseStock films={films} jobs={jobs} db={db} userId={user.uid} setView={setView} />}
-                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} setView={setView} isPdfReady={isPdfReady} />}
+                    {view === 'dashboard' && <Dashboard films={films} orders={orders} jobs={jobs} db={db} userId={user.uid} isPdfReady={isPdfReady} showNotification={showNotification} />}
+                    {view === 'stock' && <FilmInventory films={films} jobs={jobs} db={db} userId={user.uid} isPdfReady={isPdfReady} showNotification={showNotification} />}
+                    {view === 'jobs' && <JobManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} setView={setView} isPdfReady={isPdfReady} showNotification={showNotification} />}
+                    {view === 'orders' && <OrderManagement films={films} jobs={jobs} orders={orders} db={db} userId={user.uid} isPdfReady={isPdfReady} showNotification={showNotification} />}
+                    {view === 'use_stock' && <UseStock films={films} jobs={jobs} db={db} userId={user.uid} setView={setView} showNotification={showNotification} />}
+                    {view === 'film_history' && <FilmHistory db={db} userId={user.uid} jobs={jobs} setView={setView} isPdfReady={isPdfReady} showNotification={showNotification} />}
                 </main>
             </div>
+            <NotificationToast notification={notification} onClose={() => setNotification(prev => ({ ...prev, show: false }))} />
         </div>
     );
 }
 
-const LoginScreen = React.memo(function LoginScreen({ auth }) {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
 
-    const handleLogin = useCallback(async (e) => {
-        e.preventDefault();
-        setError('');
-        try {
-            await signInWithEmailAndPassword(auth, email, password);
-        } catch (error) {
-            if (error.code === 'auth/operation-not-allowed') {
-                setError(`Login failed: Email/Password sign-in is not enabled for project ${firebaseConfig.projectId}.`);
-            } else {
-                setError('Failed to log in. Please check your email and password.');
-            }
-            console.error("Login Error:", error);
-        }
-    }, [auth, email, password]);
+// --- NOTIFICATION & MODAL COMPONENTS ---
+const NotificationToast = ({ notification, onClose }) => {
+    if (!notification.show) return null;
+
+    const baseStyle = "fixed bottom-5 right-5 flex items-center p-4 rounded-lg shadow-lg text-white transition-opacity duration-300";
+    const typeStyles = {
+        success: "bg-green-600",
+        error: "bg-red-600",
+        info: "bg-blue-600"
+    };
 
     return (
-        <div className="bg-gray-900 min-h-screen flex items-center justify-center font-sans">
-            <div className="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-sm">
-                <div className="flex flex-col items-center">
-                    <LockClosedIcon />
-                    <h1 className="text-3xl font-bold text-cyan-400 mb-2">Login</h1>
-                    <p className="text-gray-400 mb-6">Please enter your credentials</p>
-                </div>
-                <form onSubmit={handleLogin} className="space-y-6">
-                    <div>
-                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" autoComplete="email"
-                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
-                    </div>
-                    <div>
-                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password"
-                            className="w-full bg-gray-700 text-white p-3 rounded-md focus:ring-2 focus:ring-cyan-500 focus:outline-none transition" />
-                    </div>
-                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-                    <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-3 rounded-md transition-transform duration-200 hover:scale-105">
-                        Login
-                    </button>
-                </form>
-            </div>
+        <div className={`${baseStyle} ${typeStyles[notification.type] || typeStyles.info}`}>
+            <p>{notification.message}</p>
+            <button onClick={onClose} className="ml-4 text-xl font-bold">&times;</button>
         </div>
     );
-});
+};
 
-// --- MODAL AND HEADER COMPONENTS ---
 const ConfirmationModal = React.memo(function ConfirmationModal({ isOpen, onClose, onConfirm, title, children }) {
     if (!isOpen) return null;
     return (
@@ -370,7 +366,7 @@ const Header = React.memo(function Header({ user }) {
         <header className="mb-8 text-center md:text-left">
             <h2 className="text-2xl font-semibold text-gray-300">SHRI GURUNANAK INDUSTRIES</h2>
             <h1 className="text-4xl md:text-5xl font-bold text-cyan-400">Rotogravure Stock Manager</h1>
-            {user && (<div className="mt-2 text-xs text-yellow-300"><p>Logged in as: {user.email || user.uid}</p></div>)}
+            {user && (<div className="mt-2 text-xs text-yellow-300"><p>User ID: {user.uid}</p></div>)}
             <p className="text-gray-400 mt-2">Your central hub for film inventory and job tracking.</p>
         </header>
     );
@@ -402,27 +398,41 @@ const Nav = React.memo(function Nav({ view, setView }) {
     );
 });
 
-const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userId, isPdfReady }) {
+const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userId, isPdfReady, showNotification }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [detailedView, setDetailedView] = useState(null);
 
     useEffect(() => {
-        if (!db || !userId) {
+        if (!db || !userId || !jobs) {
             setIsLoading(false);
+            setHistory([]);
             return;
         }
-        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
-        const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const historyData = querySnapshot.docs.map(doc => doc.data());
-            setHistory(historyData);
-            setIsLoading(false);
-        }, (error) => {
-            console.error("Error fetching history for dashboard:", error);
-            setIsLoading(false);
-        });
-        return () => unsubscribe();
-    }, [db, userId]);
+
+        setIsLoading(true);
+        const fetchAllHistory = async () => {
+            try {
+                const historyPromises = jobs.map(job => {
+                    const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
+                    return getDocs(collection(db, historyCollectionPath));
+                });
+
+                const historySnapshots = await Promise.all(historyPromises);
+                const allHistoryData = historySnapshots.flatMap(snapshot => 
+                    snapshot.docs.map(doc => doc.data())
+                );
+                
+                setHistory(allHistoryData);
+            } catch (error) {
+                console.error("Error fetching history for dashboard:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchAllHistory();
+    }, [db, userId, jobs]);
 
     const analysis = useMemo(() => {
         const totalRolls = films.length;
@@ -502,17 +512,17 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
         if (type === 'low_stock') {
             const head = [['Film Type', 'Rolls Left', 'Total Weight (kg)']];
             const body = analysis.lowStockAlerts.map(item => [item.type, item.rolls, item.weight.toFixed(2)]);
-            exportToPDF('Low Stock Report', head, body, `low-stock-report-${toYYYYMMDD(new Date())}.pdf`);
+            exportToPDF('Low Stock Report', head, body, `low-stock-report-${toYYYYMMDD(new Date())}.pdf`, showNotification);
         } else if (type === 'aging') {
             const head = [['Film Type', 'Supplier', 'Net Wt.', 'Current Wt.', 'Purchase Date', 'Days in Stock']];
             const body = analysis.agingReport.map(item => [item.filmType, item.supplier, item.netWeight, item.currentWeight.toFixed(2) ,toDDMMYYYY(item.purchaseDate), `${item.age} days`]);
-            exportToPDF('Inventory Aging Report', head, body, `aging-report-${toYYYYMMDD(new Date())}.pdf`);
+            exportToPDF('Inventory Aging Report', head, body, `aging-report-${toYYYYMMDD(new Date())}.pdf`, showNotification);
         } else if (type === 'suggestion') {
             const head = [['Material', 'Available Stock', 'Urgency Score']];
             const body = analysis.purchaseSuggestions.map(item => [item.type, item.availableStock, `${item.urgencyScore}%`]);
-            exportToPDF('Purchase Order Suggestions', head, body, `po-suggestion-${toYYYYMMDD(new Date())}.pdf`);
+            exportToPDF('Purchase Order Suggestions', head, body, `po-suggestion-${toYYYYMMDD(new Date())}.pdf`, showNotification);
         }
-    }, [analysis]);
+    }, [analysis, showNotification]);
 
     const renderDetailedView = () => {
         switch (detailedView) {
@@ -523,11 +533,22 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
                             <h3 className="text-xl font-semibold text-red-500">Low Stock Alerts</h3>
                             <button onClick={() => handleExport('low_stock')} disabled={!isPdfReady} className={`flex items-center text-sm py-1 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 ${!isPdfReady ? 'opacity-50 cursor-not-allowed' : ''}`}><DownloadIcon/><span className="ml-2">Export</span></button>
                         </div>
-                        {analysis.lowStockAlerts.length > 0 ? <ul className="space-y-1">{analysis.lowStockAlerts.map(item => <li key={item.type} className="flex justify-between p-2 bg-gray-700/50 rounded-md"><span>{item.type}</span><span className="font-bold">{item.rolls} roll(s) - {item.weight.toFixed(2)} kg</span></li>)}</ul> : <p>No items low on stock.</p>}
+                        {analysis.lowStockAlerts.length > 0 ? (
+                            <ul className="space-y-1 max-h-96 overflow-y-auto pr-2">
+                                {analysis.lowStockAlerts.map(item => (
+                                    <li key={item.type} className="flex justify-between p-2 bg-gray-700/50 rounded-md">
+                                        <span>{item.type}</span>
+                                        <span className="font-bold">{item.rolls} roll(s) - {item.weight.toFixed(2)} kg</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p>No items low on stock.</p>
+                        )}
                     </div>
                 );
             case 'aging':
-                 return (
+               return (
                     <div className="bg-gray-800 p-6 rounded-lg">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-xl font-semibold text-gray-200">Inventory Aging Report</h3>
@@ -583,9 +604,9 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
                  <div className="bg-gray-800 p-6 rounded-lg text-center hover:bg-gray-700 cursor-pointer" onClick={() => setDetailedView('suggestion')}>
                     <h3 className="text-lg font-semibold text-gray-200 mb-2">PO Suggestions</h3>
                      <div className="flex justify-center items-center h-full">
-                        <LightBulbIcon />
-                        <span className="text-2xl font-bold ml-2 text-green-400">{analysis.purchaseSuggestions.length}</span>
-                    </div>
+                         <LightBulbIcon />
+                         <span className="text-2xl font-bold ml-2 text-green-400">{analysis.purchaseSuggestions.length}</span>
+                     </div>
                 </div>
             </div>
 
@@ -604,7 +625,7 @@ const Dashboard = React.memo(function Dashboard({ films, orders, jobs, db, userI
 });
 
 
-const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isPdfReady }) {
+const FilmInventory = React.memo(function FilmInventory({ films, jobs, db, userId, isPdfReady, showNotification }) {
     const [showForm, setShowForm] = useState(false);
     const [editingFilm, setEditingFilm] = useState(null);
     const [selectedCategory, setSelectedCategory] = useState(null);
@@ -620,13 +641,18 @@ const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isP
         try {
             if (editingFilm) {
                 await updateDoc(doc(db, filmsCollectionPath, editingFilm.id), dataToSave);
+                showNotification("Film roll updated successfully!", "success");
             } else {
                 await addDoc(collection(db, filmsCollectionPath), { ...dataToSave, currentWeight: dataToSave.netWeight, createdAt: serverTimestamp() });
+                showNotification("New film roll added to inventory!", "success");
             }
             setShowForm(false);
             setEditingFilm(null);
-        } catch (error) { console.error("Error saving film:", error); }
-    }, [db, userId, editingFilm]);
+        } catch (error) { 
+            console.error("Error saving film:", error); 
+            showNotification("Error saving film.", "error");
+        }
+    }, [db, userId, editingFilm, showNotification]);
 
     const openDeleteModal = useCallback((film) => { setFilmToDelete(film); setIsDeleteModalOpen(true); }, []);
     const closeDeleteModal = useCallback(() => { setFilmToDelete(null); setIsDeleteModalOpen(false); }, []);
@@ -637,9 +663,13 @@ const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isP
         if (!db || !userId || !filmToDelete) return;
         try {
             await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/films`, filmToDelete.id));
-        } catch (error) { console.error("Error deleting film:", error); }
+            showNotification("Film roll deleted.", "success");
+        } catch (error) { 
+            console.error("Error deleting film:", error);
+            showNotification("Error deleting film.", "error");
+        }
         finally { closeDeleteModal(); }
-    }, [db, userId, filmToDelete, closeDeleteModal]);
+    }, [db, userId, filmToDelete, closeDeleteModal, showNotification]);
 
     const filmCategories = useMemo(() => films.reduce((acc, film) => {
         const key = film.filmType || 'Uncategorized';
@@ -678,8 +708,8 @@ const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isP
             });
             fileName = `film-inventory-summary-${toYYYYMMDD(new Date())}.pdf`;
         }
-        exportToPDF(title, head, body, fileName);
-    }, [selectedCategory, filmCategories, filteredCategories]);
+        exportToPDF(title, head, body, fileName, showNotification);
+    }, [selectedCategory, filmCategories, filteredCategories, showNotification]);
     
     const openAddForm = useCallback(() => {
         setEditingFilm(null);
@@ -691,7 +721,7 @@ const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isP
     }, []);
 
     if (analysisView) {
-        return <CategoryAnalysis categoryName={analysisView} films={films.filter(f => f.filmType === analysisView)} onBack={() => setAnalysisView(null)} db={db} userId={userId} />
+        return <CategoryAnalysis categoryName={analysisView} films={films.filter(f => f.filmType === analysisView)} onBack={() => setAnalysisView(null)} db={db} userId={userId} jobs={jobs} />
     }
 
     return (
@@ -742,26 +772,43 @@ const FilmInventory = React.memo(function FilmInventory({ films, db, userId, isP
     );
 });
 
-const CategoryAnalysis = React.memo(function CategoryAnalysis({ categoryName, films, onBack, db, userId }) {
+const CategoryAnalysis = React.memo(function CategoryAnalysis({ categoryName, films, onBack, db, userId, jobs }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        if (!db || !userId || !categoryName) {
+        if (!db || !userId || !jobs || !categoryName) {
             setIsLoading(false);
+            setHistory([]);
             return;
         }
-        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId), where('filmType', '==', categoryName));
-        const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const historyData = querySnapshot.docs.map(doc => doc.data());
-            setHistory(historyData);
-            setIsLoading(false);
-        }, (error) => {
-            console.error("Error fetching category history:", error);
-            setIsLoading(false);
-        });
-        return () => unsubscribe();
-    }, [db, userId, categoryName]);
+        
+        setIsLoading(true);
+        const fetchCategoryHistory = async () => {
+            try {
+                const historyPromises = jobs.map(job => {
+                    const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
+                    const q = query(collection(db, historyCollectionPath), where('filmType', '==', categoryName));
+                    return getDocs(q);
+                });
+
+                const historySnapshots = await Promise.all(historyPromises);
+                const categoryHistory = historySnapshots.flatMap(snapshot => 
+                    snapshot.docs.map(doc => doc.data())
+                );
+                
+                setHistory(categoryHistory);
+
+            } catch (error) {
+                console.error("Error fetching category history:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchCategoryHistory();
+
+    }, [db, userId, jobs, categoryName]);
 
     const totalWeight = useMemo(() => films.reduce((sum, film) => sum + (film.currentWeight || 0), 0), [films]);
     const agingReport = useMemo(() => films.map(film => ({
@@ -790,13 +837,13 @@ const CategoryAnalysis = React.memo(function CategoryAnalysis({ categoryName, fi
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <h3 className="text-xl font-semibold mb-4">Stock On Hand (Oldest First)</h3>
                      <div className="overflow-x-auto max-h-96">
-                        <table className="w-full text-left">
-                            <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Supplier</th><th className="p-2">Weight (kg)</th><th className="p-2">Days in Stock</th></tr></thead>
-                            <tbody>
-                                {agingReport.sort((a,b) => a.age - b.age).map((item) => <tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.supplier}</td><td className="p-2">{item.currentWeight.toFixed(2)}</td><td className="p-2">{item.age}</td></tr>)}
-                            </tbody>
-                        </table>
-                    </div>
+                         <table className="w-full text-left">
+                             <thead className="bg-gray-700 sticky top-0"><tr><th className="p-2">Supplier</th><th className="p-2">Weight (kg)</th><th className="p-2">Days in Stock</th></tr></thead>
+                             <tbody>
+                                 {agingReport.sort((a,b) => a.age - b.age).map((item) => <tr key={item.id} className="border-b border-gray-700"><td className="p-2">{item.supplier}</td><td className="p-2">{item.currentWeight.toFixed(2)}</td><td className="p-2">{item.age}</td></tr>)}
+                             </tbody>
+                         </table>
+                     </div>
                 </div>
                  <div className="bg-gray-800 p-6 rounded-lg">
                     <h3 className="text-xl font-semibold mb-4">Consumption History</h3>
@@ -902,7 +949,7 @@ const FilmList = React.memo(function FilmList({ films, onEdit, onDelete }) {
     );
 });
 
-const JobManagement = React.memo(function JobManagement({ films, jobs, orders, db, userId, setView, isPdfReady }) {
+const JobManagement = React.memo(function JobManagement({ films, jobs, orders, db, userId, setView, isPdfReady, showNotification }) {
     const [showForm, setShowForm] = useState(false);
     const [editingJob, setEditingJob] = useState(null);
     const [jobSearch, setJobSearch] = useState('');
@@ -917,13 +964,18 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
         try {
              if (editingJob) {
                 await updateDoc(doc(db, jobsCollectionPath, editingJob.id), jobData);
+                showNotification("Job updated successfully.", "success");
             } else {
                 await addDoc(collection(db, jobsCollectionPath), { ...jobData, createdAt: serverTimestamp() });
+                showNotification("New job created.", "success");
             }
             setShowForm(false);
             setEditingJob(null);
-        } catch (error) { console.error("Error saving job:", error); }
-    }, [db, userId, editingJob]);
+        } catch (error) { 
+            console.error("Error saving job:", error);
+            showNotification("Error saving job.", "error");
+        }
+    }, [db, userId, editingJob, showNotification]);
 
     const handleEditJob = useCallback((job) => { setEditingJob(job); setShowForm(true); }, []);
     const closeJobForm = useCallback(() => { setShowForm(false); setEditingJob(null); }, []);
@@ -945,9 +997,13 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
         const jobRef = doc(db, `artifacts/${appId}/users/${userId}/jobs`, jobToDelete.id);
         try {
             await deleteDoc(jobRef);
-        } catch (error) { console.error("Error deleting job:", error); }
+            showNotification("Job deleted successfully.", "success");
+        } catch (error) { 
+            console.error("Error deleting job:", error);
+            showNotification("Error deleting job.", "error");
+        }
         finally { closeDeleteModal(); }
-    }, [db, userId, jobToDelete, closeDeleteModal]);
+    }, [db, userId, jobToDelete, closeDeleteModal, showNotification]);
     
     const filteredJobs = useMemo(() => jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : jobs, [jobs, jobSearch]);
     
@@ -960,8 +1016,8 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
             job.materials ? job.materials.join(', ') : ''
         ]);
         const fileName = `job-management-report-${toYYYYMMDD(new Date())}.pdf`;
-        exportToPDF(title, head, body, fileName);
-    }, [filteredJobs]);
+        exportToPDF(title, head, body, fileName, showNotification);
+    }, [filteredJobs, showNotification]);
 
     const openAddForm = useCallback(() => {
         setEditingJob(null);
@@ -991,7 +1047,7 @@ const JobManagement = React.memo(function JobManagement({ films, jobs, orders, d
                 </div>
             </div>
             {showForm && <JobForm films={films} onSubmit={handleJobSubmit} onCancel={closeJobForm} initialData={editingJob} />}
-            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} setView={setView} />
+            <JobList films={films} jobs={filteredJobs} onDelete={openDeleteModal} onEdit={handleEditJob} db={db} userId={userId} setView={setView} showNotification={showNotification} />
             <ConfirmationModal isOpen={isDeleteModalOpen} onClose={closeDeleteModal} onConfirm={executeDeleteJob} title="Delete Job?">
                 <p>Are you sure you want to delete the job <strong className="text-white">{jobToDelete?.jobName}</strong>? Its consumption history will be orphaned but will remain. This action cannot be undone.</p>
             </ConfirmationModal>
@@ -1087,12 +1143,12 @@ const JobForm = React.memo(function JobForm({ onSubmit, onCancel, films, initial
     );
 });
 
-const JobList = React.memo(function JobList({ films, jobs, onDelete, onEdit, db, userId, setView }) {
+const JobList = React.memo(function JobList({ films, jobs, onDelete, onEdit, db, userId, setView, showNotification }) {
     if (jobs.length === 0) return <p className="text-center text-gray-500 py-8">No jobs found.</p>;
-    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} jobs={jobs} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} setView={setView} />)}</div>;
+    return <div className="space-y-4">{jobs.map(job => <JobCard key={job.id} job={job} jobs={jobs} films={films} onDelete={onDelete} onEdit={onEdit} db={db} userId={userId} setView={setView} showNotification={showNotification} />)}</div>;
 });
 
-const JobCard = React.memo(function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView }) {
+const JobCard = React.memo(function JobCard({ job, jobs, films, onDelete, onEdit, db, userId, setView, showNotification }) {
     const [showHistory, setShowHistory] = useState(false);
     const [showStock, setShowStock] = useState(false);
     const [history, setHistory] = useState([]);
@@ -1121,19 +1177,27 @@ const JobCard = React.memo(function JobCard({ job, jobs, films, onDelete, onEdit
         try {
             await batch.commit();
             setEditingHistoryEntry(null);
+            showNotification("Roll successfully reverted to stock.", "success");
             setView('stock');
         } catch (error) {
             console.error("Error reverting roll to stock from JobCard:", error);
-            alert("Failed to revert roll. See console for details.");
+            showNotification("Failed to revert roll.", "error");
         }
-    }, [db, userId, setView]);
+    }, [db, userId, setView, showNotification]);
 
     const handleUpdateHistory = useCallback(async (historyEntry, newDate, newJob) => {
         if (!db || !userId || !historyEntry || !newJob) return;
         if (newJob.id === historyEntry.jobId) {
             const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
-            try { await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') }); setEditingHistoryEntry(null); }
-            catch (error) { console.error("Error updating history date from JobCard:", error); }
+            try { 
+                await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') }); 
+                setEditingHistoryEntry(null);
+                showNotification("History entry updated.", "success");
+            }
+            catch (error) { 
+                console.error("Error updating history date from JobCard:", error);
+                showNotification("Failed to update history.", "error");
+            }
         } else {
             const batch = writeBatch(db);
             const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
@@ -1142,10 +1206,17 @@ const JobCard = React.memo(function JobCard({ job, jobs, films, onDelete, onEdit
             const newData = { ...rest, jobId: newJob.id, jobName: newJob.jobName, consumedAt: new Date(newDate + 'T00:00:00Z') };
             batch.set(newHistoryRef, newData);
             batch.delete(oldHistoryRef);
-            try { await batch.commit(); setEditingHistoryEntry(null); }
-            catch (error) { console.error("Error moving history entry from JobCard:", error); }
+            try { 
+                await batch.commit(); 
+                setEditingHistoryEntry(null);
+                showNotification("History entry moved to new job.", "success");
+            }
+            catch (error) { 
+                console.error("Error moving history entry from JobCard:", error); 
+                showNotification("Failed to move history entry.", "error");
+            }
         }
-    }, [db, userId]);
+    }, [db, userId, showNotification]);
 
     return (
         <>
@@ -1192,13 +1263,13 @@ const JobCard = React.memo(function JobCard({ job, jobs, films, onDelete, onEdit
                     </div>
                 )}
             </div>
-            <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} />
+            <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} showNotification={showNotification} />
         </>
     );
 });
 
 
-const OrderManagement = React.memo(function OrderManagement({ films, jobs, orders, db, userId, isPdfReady }) {
+const OrderManagement = React.memo(function OrderManagement({ films, jobs, orders, db, userId, isPdfReady, showNotification }) {
     const [showForm, setShowForm] = useState(false);
     const [viewType, setViewType] = useState('active');
     const [completedSearch, setCompletedSearch] = useState('');
@@ -1235,8 +1306,12 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
                 planningIndex: highestIndex + 1
             });
             setShowForm(false);
-        } catch (error) { console.error("Error creating order:", error); }
-    }, [db, userId, orders]);
+            showNotification("New order created successfully.", "success");
+        } catch (error) { 
+            console.error("Error creating order:", error);
+            showNotification("Failed to create order.", "error");
+        }
+    }, [db, userId, orders, showNotification]);
 
     const handleOpenCompleteModal = useCallback((order) => { setOrderToComplete(order); setIsCompleteModalOpen(true); }, []);
     const handleCloseCompleteModal = useCallback(() => { setOrderToComplete(null); setIsCompleteModalOpen(false); }, []);
@@ -1251,22 +1326,30 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
                 planningIndex: -1,
                 notes: notes || ''
             });
+            showNotification("Order marked as complete.", "success");
         } catch(error) {
             console.error("Error completing order: ", error);
+            showNotification("Failed to complete order.", "error");
         } finally {
             handleCloseCompleteModal();
         }
-    }, [db, userId, handleCloseCompleteModal]);
+    }, [db, userId, handleCloseCompleteModal, showNotification]);
 
     const openDeleteModal = useCallback((order) => { setOrderToDelete(order); setIsDeleteModalOpen(true); }, []);
     const closeDeleteModal = useCallback(() => { setOrderToDelete(null); setIsDeleteModalOpen(false); }, []);
     
     const executeDeleteOrder = useCallback(async () => {
         if (!orderToDelete) return;
-        try { await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/orders`, orderToDelete.id)); }
-        catch (error) { console.error("Error deleting order: ", error); }
+        try { 
+            await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/orders`, orderToDelete.id));
+            showNotification("Order deleted.", "success");
+        }
+        catch (error) { 
+            console.error("Error deleting order: ", error);
+            showNotification("Failed to delete order.", "error");
+        }
         finally { closeDeleteModal(); }
-    }, [db, userId, orderToDelete, closeDeleteModal]);
+    }, [db, userId, orderToDelete, closeDeleteModal, showNotification]);
     
     const activeOrders = useMemo(() => orders.filter(o => o.status === 'active' && o.planningIndex !== undefined).sort((a, b) => (a.planningIndex || 0) - (b.planningIndex || 0)), [orders]);
     const completedOrders = useMemo(() => orders.filter(o => o.status === 'completed' && o.orderName.toLowerCase().includes(completedSearch.toLowerCase())).sort((a,b) => (b.completedAt?.toDate() || 0) - (a.completedAt?.toDate() || 0)), [orders, completedSearch]);
@@ -1286,14 +1369,24 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
         batch.update(orderToMoveRef, { planningIndex: orderToSwap.planningIndex });
         batch.update(orderToSwapRef, { planningIndex: orderToMove.planningIndex });
 
-        await batch.commit();
+        try {
+            await batch.commit();
+        } catch (error) {
+            console.error("Failed to reorder:", error);
+            showNotification("Failed to reorder orders.", "error");
+        }
 
-    }, [activeOrders, db, userId]);
+    }, [activeOrders, db, userId, showNotification]);
 
     const handleExportOrdersPDF = useCallback(() => {
         const currentOrders = viewType === 'active' ? activeOrders : completedOrders;
         const title = `${viewType.charAt(0).toUpperCase() + viewType.slice(1)} Orders Report`;
         const fileName = `orders-${viewType}-report-${toYYYYMMDD(new Date())}.pdf`;
+
+        if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') {
+            showNotification('PDF library is still loading. Please try again.', 'error');
+            return;
+        }
 
         const doc = new window.jspdf.jsPDF();
         let yPos = 22;
@@ -1368,7 +1461,7 @@ const OrderManagement = React.memo(function OrderManagement({ films, jobs, order
         });
 
         doc.save(fileName);
-    }, [viewType, activeOrders, completedOrders, jobs, films]);
+    }, [viewType, activeOrders, completedOrders, jobs, films, showNotification]);
 
     const openAddForm = useCallback(() => setShowForm(true), []);
     const closeAddForm = useCallback(() => setShowForm(false), []);
@@ -1545,19 +1638,19 @@ const OrderCard = React.memo(function OrderCard({ order, jobs, films, onDelete, 
                     <div className="space-y-1">
                         {stockStatus.details.map((detail, i) => (<div key={i} className="flex justify-between items-center text-sm"><span className="text-gray-300">{detail.name}</span>{detail.inStock ? <span className="font-semibold text-green-400">{detail.rollCount} rolls ({detail.totalWeight.toFixed(2)} kg)</span> : <span className="font-semibold text-red-400">Out of Stock</span>}</div>))}
                     </div>
-                     {showHistory && (
-                         <div className="mt-4 border-t border-gray-600 pt-3">
-                             <h5 className="font-semibold text-cyan-400 mb-2">Consumed Roll History</h5>
-                             {isLoadingHistory ? <p className="text-sm text-gray-400">Loading history...</p> : (history.length > 0 ? <ul className="space-y-2 text-sm">{history.map(roll => (<li key={roll.id} className="p-2 bg-gray-700/50 rounded-md"><p className="font-semibold text-gray-200">{roll.filmType}</p><p className="text-gray-400">Consumed: {toDDMMYYYY(roll.consumedAt?.toDate())}</p></li>))}</ul> : <p className="text-sm text-gray-400">No rolls consumed for this job yet.</p>)}
-                         </div>
-                     )}
+                      {showHistory && (
+                           <div className="mt-4 border-t border-gray-600 pt-3">
+                               <h5 className="font-semibold text-cyan-400 mb-2">Consumed Roll History</h5>
+                               {isLoadingHistory ? <p className="text-sm text-gray-400">Loading history...</p> : (history.length > 0 ? <ul className="space-y-2 text-sm">{history.map(roll => (<li key={roll.id} className="p-2 bg-gray-700/50 rounded-md"><p className="font-semibold text-gray-200">{roll.filmType}</p><p className="text-gray-400">Consumed: {toDDMMYYYY(roll.consumedAt?.toDate())}</p></li>))}</ul> : <p className="text-sm text-gray-400">No rolls consumed for this job yet.</p>)}
+                           </div>
+                      )}
                 </div>
             )}
         </div>
     );
 });
 
-const UseStock = React.memo(function UseStock({ films, jobs, db, userId, setView }) {
+const UseStock = React.memo(function UseStock({ films, jobs, db, userId, setView, showNotification }) {
     const [selectedJob, setSelectedJob] = useState(null);
     const [jobSearch, setJobSearch] = useState('');
     const [showJobResults, setShowJobResults] = useState(false);
@@ -1591,13 +1684,13 @@ const UseStock = React.memo(function UseStock({ films, jobs, db, userId, setView
         batch.delete(doc(db, `artifacts/${appId}/users/${userId}/films`, selectedRoll.id));
         try {
             await batch.commit();
-            setMessageModal({isOpen: true, title: "Success", body: "Roll has been used and recorded in the job history."});
+            showNotification("Roll has been used and recorded in the job history.", "success");
             setView('jobs');
         } catch (error) {
             console.error("CRITICAL ERROR in handleUseRoll:", error);
-            setMessageModal({isOpen: true, title: "Database Error", body: `Failed to use roll. Please check console for details.`});
+            showNotification(`Failed to use roll.`, "error");
         } finally { setIsProcessing(false); }
-    }, [selectedRoll, selectedJob, db, dateOfUse, userId, setView]);
+    }, [selectedRoll, selectedJob, db, dateOfUse, userId, setView, showNotification]);
     
     const filteredJobs = useMemo(() => jobSearch ? jobs.filter(job => job.jobName.toLowerCase().includes(jobSearch.toLowerCase())) : [], [jobs, jobSearch]);
     const handleJobSelect = (job) => { setSelectedJob(job); setJobSearch(job.jobName); setShowJobResults(false); };
@@ -1659,24 +1752,44 @@ const UseStock = React.memo(function UseStock({ films, jobs, db, userId, setView
     );
 });
 
-const FilmHistory = React.memo(function FilmHistory({ db, userId, jobs, setView, isPdfReady }) {
+const FilmHistory = React.memo(function FilmHistory({ db, userId, jobs, setView, isPdfReady, showNotification }) {
     const [history, setHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [historySearch, setHistorySearch] = useState('');
     const [editingHistoryEntry, setEditingHistoryEntry] = useState(null);
 
     useEffect(() => {
-        if (!db || !userId) { setIsLoading(false); return; }
-        setIsLoading(true);
-        const q = query(collectionGroup(db, 'consumedRolls'), where('consumedBy', '==', userId));
-        const unsubscribe = onSnapshot(q, (querySnapshot) => {
-            const combinedHistory = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
-            setHistory(combinedHistory);
+        if (!db || !userId || !jobs) {
             setIsLoading(false);
-        }, (error) => { console.error("Error fetching global film history:", error); setIsLoading(false); });
-        return () => unsubscribe();
-    }, [db, userId]);
+            setHistory([]);
+            return;
+        }
+
+        setIsLoading(true);
+        const fetchAllHistory = async () => {
+            try {
+                const historyPromises = jobs.map(job => {
+                    const historyCollectionPath = `artifacts/${appId}/users/${userId}/jobs/${job.id}/consumedRolls`;
+                    return getDocs(collection(db, historyCollectionPath));
+                });
+
+                const historySnapshots = await Promise.all(historyPromises);
+                const combinedHistory = historySnapshots.flatMap(snapshot => 
+                    snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+                );
+                
+                combinedHistory.sort((a, b) => (b.consumedAt?.toDate() || 0) - (a.consumedAt?.toDate() || 0));
+                setHistory(combinedHistory);
+
+            } catch (error) {
+                console.error("Error fetching global film history:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchAllHistory();
+    }, [db, userId, jobs]);
 
     const handleRevertToStock = useCallback(async (historyEntry) => {
         if (!db || !userId || !historyEntry) return;
@@ -1687,21 +1800,28 @@ const FilmHistory = React.memo(function FilmHistory({ db, userId, jobs, setView,
         batch.delete(doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id));
         try {
             await batch.commit();
-            alert("Roll successfully reverted to stock.");
+            showNotification("Roll successfully reverted to stock.", "success");
             setEditingHistoryEntry(null);
             setView('stock');
         } catch (error) {
             console.error("Error reverting roll to stock:", error);
-            alert("Failed to revert roll. Check console for details.");
+            showNotification("Failed to revert roll.", "error");
         }
-    }, [db, userId, setView]);
+    }, [db, userId, setView, showNotification]);
 
     const handleUpdateHistory = useCallback(async (historyEntry, newDate, newJob) => {
         if (!db || !userId || !historyEntry || !newJob) return;
         if (newJob.id === historyEntry.jobId) {
             const historyRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
-            try { await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') }); setEditingHistoryEntry(null); }
-            catch (error) { console.error("Error updating history date:", error); alert("Failed to update date."); }
+            try { 
+                await updateDoc(historyRef, { consumedAt: new Date(newDate + 'T00:00:00Z') }); 
+                setEditingHistoryEntry(null);
+                showNotification("History entry updated.", "success");
+            }
+            catch (error) { 
+                console.error("Error updating history date:", error); 
+                showNotification("Failed to update date.", "error");
+            }
         } else {
             const batch = writeBatch(db);
             const oldHistoryRef = doc(db, `artifacts/${appId}/users/${userId}/jobs/${historyEntry.jobId}/consumedRolls`, historyEntry.id);
@@ -1710,10 +1830,17 @@ const FilmHistory = React.memo(function FilmHistory({ db, userId, jobs, setView,
             const newData = { ...rest, jobId: newJob.id, jobName: newJob.jobName, consumedAt: new Date(newDate + 'T00:00:00Z') };
             batch.set(newHistoryRef, newData);
             batch.delete(oldHistoryRef);
-            try { await batch.commit(); setEditingHistoryEntry(null); }
-            catch (error) { console.error("Error moving history entry:", error); alert("Failed to move history entry."); }
+            try { 
+                await batch.commit(); 
+                setEditingHistoryEntry(null);
+                showNotification("History entry moved successfully.", "success");
+            }
+            catch (error) { 
+                console.error("Error moving history entry:", error); 
+                showNotification("Failed to move history entry.", "error");
+            }
         }
-    }, [db, userId]);
+    }, [db, userId, showNotification]);
 
     const filteredHistory = useMemo(() => history.filter(item => {
         const searchTerm = historySearch.toLowerCase();
@@ -1725,8 +1852,8 @@ const FilmHistory = React.memo(function FilmHistory({ db, userId, jobs, setView,
         const head = [['Film Type', 'Used in Job', 'Date Used', 'Supplier', 'Original Wt. (kg)']];
         const body = filteredHistory.map(item => [ item.filmType, item.jobName, toDDMMYYYY(item.consumedAt), item.supplier, item.netWeight?.toFixed(2)]);
         const fileName = `film-history-report-${toYYYYMMDD(new Date())}.pdf`;
-        exportToPDF(title, head, body, fileName);
-    }, [filteredHistory]);
+        exportToPDF(title, head, body, fileName, showNotification);
+    }, [filteredHistory, showNotification]);
 
     return(
         <section>
@@ -1743,12 +1870,12 @@ const FilmHistory = React.memo(function FilmHistory({ db, userId, jobs, setView,
                 </button>
             </div>
             {isLoading ? <p>Loading history...</p> : (<div className="space-y-3">{filteredHistory.length > 0 ? filteredHistory.map(item => (<div key={item.id + item.jobId} className="bg-gray-800 p-4 rounded-lg flex justify-between items-center"><div><p className="font-bold text-lg text-cyan-400">{item.filmType}</p><p className="text-gray-300">Used in Job: <span className="font-semibold">{item.jobName || 'N/A'}</span></p><p className="text-gray-400 text-sm">Date Used: {toDDMMYYYY(item.consumedAt)}</p><p className="text-gray-400 text-sm">Supplier: {item.supplier} | Original Wt: {item.netWeight.toFixed(2)}kg</p></div><button onClick={() => setEditingHistoryEntry(item)} className="text-blue-400 hover:text-blue-300 p-2"><EditIcon /></button></div>)) : <p className="text-center text-gray-500 py-8">No usage history found.</p>}</div>)}
-            <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} />
+            <AdvancedEditHistoryModal isOpen={!!editingHistoryEntry} onClose={() => setEditingHistoryEntry(null)} historyEntry={editingHistoryEntry} jobs={jobs} onUpdate={handleUpdateHistory} onRevert={handleRevertToStock} showNotification={showNotification} />
         </section>
     );
 });
 
-const AdvancedEditHistoryModal = React.memo(function AdvancedEditHistoryModal({ isOpen, onClose, historyEntry, jobs, onUpdate, onRevert }) {
+const AdvancedEditHistoryModal = React.memo(function AdvancedEditHistoryModal({ isOpen, onClose, historyEntry, jobs, onUpdate, onRevert, showNotification }) {
     const [consumedAt, setConsumedAt] = useState('');
     const [selectedJobId, setSelectedJobId] = useState('');
     const [showRevertConfirm, setShowRevertConfirm] = useState(false);
@@ -1765,7 +1892,10 @@ const AdvancedEditHistoryModal = React.memo(function AdvancedEditHistoryModal({ 
 
     const handleUpdate = () => {
         const job = jobs.find(j => j.id === selectedJobId);
-        if (!job) { alert("Please select a valid job."); return; }
+        if (!job) { 
+            showNotification("Please select a valid job.", "error");
+            return; 
+        }
         onUpdate(historyEntry, consumedAt, job);
     };
 
